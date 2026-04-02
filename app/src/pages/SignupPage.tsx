@@ -158,8 +158,14 @@ export function SignupPage() {
     }, 5000);
   };
 
+  // UPDATED: Use raw fetch instead of supabase.functions.invoke
   const initiatePayment = async (userId: string, phoneNumber: string) => {
     try {
+      // Ensure phone number starts with 254
+      const formattedPhone = phoneNumber.startsWith('254')
+        ? phoneNumber
+        : `254${phoneNumber.replace(/^0+/, '')}`;
+
       // Create payment record
       const { error: paymentError } = await supabase
         .from('payments')
@@ -168,37 +174,40 @@ export function SignupPage() {
           payment_type: 'registration',
           amount: 200,
           status: 'pending',
-          phone_number: phoneNumber,
+          phone_number: formattedPhone,
         })
         .select()
         .single();
 
       if (paymentError) throw paymentError;
 
-      // Call M-Pesa STK Push edge function
-      const { error: mpesaError } = await supabase.functions.invoke('mpesa-stk-push', {
-        body: {
-          phoneNumber,
-          amount: 200,
-          accountReference: `REG-${userId}`,
-          transactionDesc: 'Referral Ninja Registration',
-        },
-      });
+      // Call M-Pesa STK Push using raw fetch (no auth headers)
+      const response = await fetch(
+        'https://jdnowuqzsufkhgrnunpb.supabase.co/functions/v1/mpesa-stk-push',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phoneNumber: formattedPhone,
+            amount: 200,
+            accountReference: `REG-${userId}`,
+            transactionDesc: 'Referral Ninja Registration',
+          }),
+        }
+      );
 
-      if (mpesaError) {
-        console.error('M-Pesa error:', mpesaError);
-        // Continue anyway - user might pay manually
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'STK push failed');
       }
 
       setPaymentStatus('verifying');
       setPaymentMessage('Please check your phone and enter M-Pesa PIN to complete payment...');
-      
-      // Start checking for payment
       checkPaymentStatus(userId);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Payment initiation error:', error);
       setPaymentStatus('failed');
-      setPaymentMessage('Failed to initiate payment. Please try again.');
+      setPaymentMessage(error.message || 'Failed to initiate payment. Please try again.');
     }
   };
 
