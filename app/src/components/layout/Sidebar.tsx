@@ -1,11 +1,11 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  User, 
-  Briefcase, 
-  Users, 
-  Wallet, 
-  Settings, 
+import {
+  LayoutDashboard,
+  User,
+  Briefcase,
+  Users,
+  Wallet,
+  Settings,
   LogOut,
   Shield,
   Menu
@@ -42,7 +42,25 @@ export function Sidebar({ className }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const isAdminRoute = location.pathname.startsWith('/admin');
-  const navItems = isAdminRoute && isAdmin ? adminNavItems : userNavItems;
+
+  const getNavItems = () => {
+    if (isAdminRoute && isAdmin) {
+      // On admin routes, show admin navigation + a link back to user area
+      return [
+        ...adminNavItems,
+        { path: '/dashboard', label: 'Back to User Area', icon: LayoutDashboard }
+      ];
+    } else {
+      // On user routes, show user navigation + admin link if user is admin
+      const items = [...userNavItems];
+      if (isAdmin) {
+        items.push({ path: '/admin', label: 'Admin Panel', icon: Shield });
+      }
+      return items;
+    }
+  };
+
+  const navItems = getNavItems();
 
   const handleLogout = async () => {
     await logout();
@@ -73,8 +91,8 @@ export function Sidebar({ className }: SidebarProps) {
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-ninja-green/20 flex items-center justify-center border border-ninja-green/30 overflow-hidden">
               {user.avatar_url ? (
-                <img 
-                  src={user.avatar_url} 
+                <img
+                  src={user.avatar_url}
                   alt={user.username}
                   className="w-full h-full object-cover"
                 />
@@ -95,7 +113,7 @@ export function Sidebar({ className }: SidebarProps) {
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path;
-          
+
           return (
             <NavLink
               key={item.path}
@@ -103,8 +121,8 @@ export function Sidebar({ className }: SidebarProps) {
               onClick={() => setIsOpen(false)}
               className={cn(
                 'flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300',
-                isActive 
-                  ? 'text-ninja-green bg-ninja-green/10 border border-ninja-green/30' 
+                isActive
+                  ? 'text-ninja-green bg-ninja-green/10 border border-ninja-green/30'
                   : 'text-ninja-sage hover:text-ninja-mint hover:bg-ninja-green/10'
               )}
             >
@@ -131,7 +149,7 @@ export function Sidebar({ className }: SidebarProps) {
   return (
     <>
       {/* Desktop Sidebar */}
-      <aside 
+      <aside
         className={cn(
           'hidden lg:flex flex-col w-72 bg-ninja-dark/50 backdrop-blur-xl border-r border-ninja-green/10 h-screen sticky top-0',
           className
@@ -147,8 +165,8 @@ export function Sidebar({ className }: SidebarProps) {
             <Menu className="w-6 h-6" />
           </button>
         </SheetTrigger>
-        <SheetContent 
-          side="left" 
+        <SheetContent
+          side="left"
           className="w-72 p-0 bg-ninja-dark/95 backdrop-blur-xl border-r border-ninja-green/10"
         >
           <SidebarContent />
