@@ -158,7 +158,7 @@ export function SignupPage() {
     }, 5000);
   };
 
-  // UPDATED: Use raw fetch instead of supabase.functions.invoke
+  // UPDATED: Use RPC database function to safely create payment
   const initiatePayment = async (userId: string, phoneNumber: string) => {
     try {
       // Ensure phone number starts with 254
@@ -166,22 +166,24 @@ export function SignupPage() {
         ? phoneNumber
         : `254${phoneNumber.replace(/^0+/, '')}`;
 
-      // Create payment record
-      const { error: paymentError } = await supabase
-        .from('payments')
-        .insert({
-          user_id: userId,
-          payment_type: 'registration',
-          amount: 200,
-          status: 'pending',
-          phone_number: formattedPhone,
-        })
-        .select()
-        .single();
+      // Call database function to safely create payment
+      const { data: result, error: rpcError } = await supabase.rpc(
+        'initiate_registration_payment',
+        {
+          p_user_id: userId,
+          p_phone_number: formattedPhone,
+        }
+      );
 
-      if (paymentError) throw paymentError;
+      if (rpcError) {
+        throw rpcError;
+      }
 
-      // Call M-Pesa STK Push using raw fetch (no auth headers)
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to create payment record');
+      }
+
+      // Call M-Pesa STK Push
       const response = await fetch(
         'https://jdnowuqzsufkhgrnunpb.supabase.co/functions/v1/mpesa-stk-push',
         {
@@ -196,18 +198,25 @@ export function SignupPage() {
         }
       );
 
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || 'STK push failed');
+      const mpesaResult = await response.json();
+      if (!mpesaResult.success) {
+        throw new Error(mpesaResult.error || 'STK push failed');
       }
 
       setPaymentStatus('verifying');
       setPaymentMessage('Please check your phone and enter M-Pesa PIN to complete payment...');
       checkPaymentStatus(userId);
+      
     } catch (error: any) {
       console.error('Payment initiation error:', error);
       setPaymentStatus('failed');
       setPaymentMessage(error.message || 'Failed to initiate payment. Please try again.');
+      
+      // Clean up on failure
+      setTimeout(() => {
+        setShowPaymentDialog(false);
+        setIsSubmitting(false);
+      }, 3000);
     }
   };
 
@@ -215,13 +224,7 @@ export function SignupPage() {
     setIsSubmitting(true);
     
     try {
-      // 1. Upload avatar if provided
-      let avatarUrl = null;
-      if (avatarFile) {
-        // Will upload after user creation
-      }
-
-      // 2. Create auth user
+      // 1. Create auth user
       const referralCode = generateReferralCode();
       const { data: authData, error: authError } = await signUp(
         data.email,
@@ -235,20 +238,35 @@ export function SignupPage() {
         }
       );
 
-      if (authError) {
-        throw authError;
-      }
-
-      if (!authData.user) {
-        throw new Error('Failed to create user');
+      if (authError || !authData.user) {
+        throw authError || new Error('Failed to create user');
       }
 
       const userId = authData.user.id;
       setCreatedUserId(userId);
 
-      // 3. Upload avatar
+      // 2. EXPLICITLY CREATE PROFILE (don't rely solely on trigger)
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: userId,
+          legal_name: data.legalName,
+          username: data.username,
+          email: data.email,
+          phone_number: data.phoneNumber,
+          referral_code: referralCode,
+          referred_by: data.referralCode || null,
+        });
+
+      if (profileError) {
+        // If profile creation fails, clean up auth user
+        await supabase.auth.admin.deleteUser(userId);
+        throw profileError;
+      }
+
+      // 3. Upload avatar if provided
       if (avatarFile) {
-        avatarUrl = await uploadAvatar(userId, avatarFile);
+        const avatarUrl = await uploadAvatar(userId, avatarFile);
         await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('id', userId);
       }
 
