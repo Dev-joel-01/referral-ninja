@@ -8,7 +8,8 @@ import {
   Settings,
   LogOut,
   Shield,
-  Menu
+  Menu,
+  FileText,        // ← added for Mafullu
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
@@ -25,6 +26,7 @@ const userNavItems = [
   { path: '/tasks', label: 'Task Zone', icon: Briefcase },
   { path: '/referrals', label: 'Referrals', icon: Users },
   { path: '/payments', label: 'Payments', icon: Wallet },
+  { path: '/mafullu', label: 'Mafullu', icon: FileText },   // ← new item
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
