@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { 
   Briefcase, 
   MapPin, 
@@ -17,6 +17,22 @@ import { format } from 'date-fns';
 import type { Task } from '@/types';
 
 type TaskType = 'remote' | 'local_intern' | 'local_job';
+
+// Helper function to get public URL from Supabase Storage
+const getTaskImageUrl = (path: string | null): string | null => {
+  if (!path) return null;
+  
+  // If already a full URL, return as-is
+  if (path.startsWith('http')) return path;
+  
+  // Construct Supabase public URL
+  const { data } = supabase
+    .storage
+    .from('task-images')
+    .getPublicUrl(path);
+    
+  return data.publicUrl;
+};
 
 export function TaskZonePage() {
   const { user } = useAuth();
@@ -112,17 +128,26 @@ export function TaskZonePage() {
   const TaskCard = ({ task }: { task: Task }) => {
     const isClicked = clickedTasks.has(task.id);
     const Icon = task.task_type === 'remote' ? Globe : MapPin;
+    
+    // Get the first image URL using the helper
+    const imageUrl = useMemo(() => {
+      return task.images?.[0] ? getTaskImageUrl(task.images[0]) : null;
+    }, [task.images]);
 
     return (
       <GlassCard padding="md" hover className="cursor-pointer" onClick={() => handleTaskClick(task)}>
         <div className="flex items-start gap-4">
           {/* Image */}
           <div className="w-24 h-24 rounded-xl bg-ninja-black/50 flex items-center justify-center overflow-hidden flex-shrink-0 border border-ninja-green/10">
-            {task.images && task.images.length > 0 ? (
+            {imageUrl ? (
               <img 
-                src={task.images[0]} 
+                src={imageUrl}
                 alt={task.title}
                 className="w-full h-full object-cover"
+                onError={(e) => {
+                  console.error('Failed to load image:', imageUrl);
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
               />
             ) : (
               <Briefcase className="w-8 h-8 text-ninja-green/50" />
@@ -279,18 +304,31 @@ export function TaskZonePage() {
               </DialogHeader>
 
               <div className="space-y-4">
-                {/* Images */}
+                {/* Images - Fixed to use getTaskImageUrl */}
                 {selectedTask.images && selectedTask.images.length > 0 && (
                   <div className="grid grid-cols-2 gap-2">
-                    {selectedTask.images.map((img, idx) => (
-                      <div key={idx} className="aspect-video rounded-xl overflow-hidden border border-ninja-green/10">
-                        <img 
-                          src={img} 
-                          alt={`${selectedTask.title} - ${idx + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                    ))}
+                    {selectedTask.images.map((img, idx) => {
+                      const fullUrl = getTaskImageUrl(img);
+                      return (
+                        <div key={idx} className="aspect-video rounded-xl overflow-hidden border border-ninja-green/10">
+                          {fullUrl ? (
+                            <img 
+                              src={fullUrl}
+                              alt={`${selectedTask.title} - ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                console.error('Failed to load image:', fullUrl);
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-ninja-black/50 flex items-center justify-center">
+                              <Briefcase className="w-8 h-8 text-ninja-green/30" />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
