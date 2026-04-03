@@ -18,20 +18,27 @@ import type { Task } from '@/types';
 
 type TaskType = 'remote' | 'local_intern' | 'local_job';
 
-// Helper function to get public URL from Supabase Storage
+// Helper to get image URL - handles multiple formats
 const getTaskImageUrl = (path: string | null): string | null => {
   if (!path) return null;
   
-  // If already a full URL, return as-is
-  if (path.startsWith('http')) return path;
+  // If it's already a full URL, verify it contains our bucket/project
+  if (path.startsWith('http')) {
+    // Check if it's a valid Supabase URL for our project
+    if (path.includes('supabase.co/storage/v1/object/public/task-images/')) {
+      return path;
+    }
+    // If it's some other URL, use it anyway
+    return path;
+  }
   
-  // Construct Supabase public URL
+  // If it's just a filename, construct the URL
   const { data } = supabase
     .storage
     .from('task-images')
     .getPublicUrl(path);
     
-  return data.publicUrl;
+  return data?.publicUrl || null;
 };
 
 export function TaskZonePage() {
@@ -45,6 +52,17 @@ export function TaskZonePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
+
+  // Debug: Log tasks to see image format
+  useEffect(() => {
+    console.log('Tasks loaded:', tasks);
+    Object.values(tasks).flat().forEach(task => {
+      if (task.images?.length) {
+        console.log(`Task "${task.title}" images:`, task.images);
+      }
+    });
+  }, [tasks]);
 
   useEffect(() => {
     fetchTasks();
@@ -102,59 +120,73 @@ export function TaskZonePage() {
   };
 
   const handleTaskClick = async (task: Task) => {
-    if (!user) return;
+    if (!user) {
+      setSelectedTask(task);
+      setShowTaskDialog(true);
+      return;
+    }
 
     try {
-      // Record the click
-      await supabase.from('task_clicks').upsert({
-        task_id: task.id,
-        user_id: user.id,
-      });
+      const { error: clickError } = await supabase
+        .from('task_clicks')
+        .insert({
+          task_id: task.id,
+          user_id: user.id,
+        });
 
-      // Increment click count
-      await supabase.rpc('increment_task_clicks', { task_id: task.id });
+      if (!clickError) {
+        await supabase
+          .from('tasks')
+          .update({ click_count: (task.click_count || 0) + 1 })
+          .eq('id', task.id);
+        
+        task.click_count = (task.click_count || 0) + 1;
+      }
 
-      // Update local state
       setClickedTasks((prev) => new Set(prev).add(task.id));
-      
-      // Show dialog
       setSelectedTask(task);
       setShowTaskDialog(true);
     } catch (error) {
       console.error('Error recording task click:', error);
+      setSelectedTask(task);
+      setShowTaskDialog(true);
     }
+  };
+
+  const handleImageError = (url: string, taskTitle: string) => {
+    console.error(`Image failed to load for "${taskTitle}":`, url);
+    setImageErrors(prev => new Set(prev).add(url));
   };
 
   const TaskCard = ({ task }: { task: Task }) => {
     const isClicked = clickedTasks.has(task.id);
     const Icon = task.task_type === 'remote' ? Globe : MapPin;
     
-    // Get the first image URL using the helper
     const imageUrl = useMemo(() => {
       return task.images?.[0] ? getTaskImageUrl(task.images[0]) : null;
     }, [task.images]);
 
+    const hasImageError = imageUrl ? imageErrors.has(imageUrl) : false;
+
     return (
       <GlassCard padding="md" hover className="cursor-pointer" onClick={() => handleTaskClick(task)}>
         <div className="flex items-start gap-4">
-          {/* Image */}
           <div className="w-24 h-24 rounded-xl bg-ninja-black/50 flex items-center justify-center overflow-hidden flex-shrink-0 border border-ninja-green/10">
-            {imageUrl ? (
+            {imageUrl && !hasImageError ? (
               <img 
                 src={imageUrl}
                 alt={task.title}
                 className="w-full h-full object-cover"
-                onError={(e) => {
-                  console.error('Failed to load image:', imageUrl);
-                  (e.target as HTMLImageElement).style.display = 'none';
-                }}
+                onError={() => handleImageError(imageUrl!, task.title)}
               />
             ) : (
-              <Briefcase className="w-8 h-8 text-ninja-green/50" />
+              <div className="flex flex-col items-center justify-center text-ninja-sage">
+                <Briefcase className="w-8 h-8 text-ninja-green/50 mb-1" />
+                {hasImageError && <span className="text-[10px]">Image error</span>}
+              </div>
             )}
           </div>
 
-          {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -178,7 +210,7 @@ export function TaskZonePage() {
             <div className="flex items-center gap-4 mt-3 text-xs text-ninja-sage">
               <span className="flex items-center gap-1">
                 <Eye className="w-3 h-3" />
-                {task.click_count} clicks
+                {task.click_count || 0} clicks
               </span>
               <span className="flex items-center gap-1">
                 <Calendar className="w-3 h-3" />
@@ -232,13 +264,11 @@ export function TaskZonePage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-3xl font-heading font-light text-ninja-mint">Task Zone</h1>
         <p className="text-ninja-sage">Browse and apply to available opportunities</p>
       </div>
 
-      {/* Tabs */}
       <Tabs defaultValue="remote" className="w-full">
         <TabsList className="grid w-full grid-cols-3 bg-ninja-dark/50 border border-ninja-green/20">
           <TabsTrigger 
@@ -277,7 +307,6 @@ export function TaskZonePage() {
         </TabsContent>
       </Tabs>
 
-      {/* Task Detail Dialog */}
       <Dialog open={showTaskDialog} onOpenChange={setShowTaskDialog}>
         <DialogContent className="bg-ninja-dark/95 backdrop-blur-xl border-ninja-green/20 max-w-lg">
           {selectedTask && (
@@ -304,26 +333,25 @@ export function TaskZonePage() {
               </DialogHeader>
 
               <div className="space-y-4">
-                {/* Images - Fixed to use getTaskImageUrl */}
                 {selectedTask.images && selectedTask.images.length > 0 && (
                   <div className="grid grid-cols-2 gap-2">
                     {selectedTask.images.map((img, idx) => {
                       const fullUrl = getTaskImageUrl(img);
+                      const hasError = fullUrl ? imageErrors.has(fullUrl) : false;
+                      
                       return (
                         <div key={idx} className="aspect-video rounded-xl overflow-hidden border border-ninja-green/10">
-                          {fullUrl ? (
+                          {fullUrl && !hasError ? (
                             <img 
                               src={fullUrl}
                               alt={`${selectedTask.title} - ${idx + 1}`}
                               className="w-full h-full object-cover"
-                              onError={(e) => {
-                                console.error('Failed to load image:', fullUrl);
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
+                              onError={() => fullUrl && handleImageError(fullUrl, selectedTask.title)}
                             />
                           ) : (
-                            <div className="w-full h-full bg-ninja-black/50 flex items-center justify-center">
-                              <Briefcase className="w-8 h-8 text-ninja-green/30" />
+                            <div className="w-full h-full bg-ninja-black/50 flex flex-col items-center justify-center">
+                              <Briefcase className="w-8 h-8 text-ninja-green/30 mb-1" />
+                              {hasError && <span className="text-[10px] text-ninja-sage">Failed to load</span>}
                             </div>
                           )}
                         </div>
@@ -332,20 +360,17 @@ export function TaskZonePage() {
                   </div>
                 )}
 
-                {/* Description */}
                 <div className="p-4 rounded-xl bg-ninja-black/50 border border-ninja-green/10">
                   <p className="text-ninja-mint whitespace-pre-wrap">{selectedTask.description}</p>
                 </div>
 
-                {/* Stats */}
                 <div className="flex items-center gap-4 text-sm text-ninja-sage">
                   <span className="flex items-center gap-1">
                     <Eye className="w-4 h-4" />
-                    {selectedTask.click_count} people clicked
+                    {selectedTask.click_count || 0} people clicked
                   </span>
                 </div>
 
-                {/* Action Button */}
                 {selectedTask.website_link && (
                   <a
                     href={selectedTask.website_link}
