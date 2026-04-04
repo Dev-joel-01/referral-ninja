@@ -1,0 +1,11 @@
+services:
+  - type: static
+    name: referral-ninja-1
+    runtime: node
+    rootDir: app
+    buildCommand: npm install && npm run build
+    publishDir: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
