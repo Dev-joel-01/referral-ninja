@@ -3,58 +3,51 @@
   
   <!-- Homepage -->
   <url>
-    <loc>https://referralninja.co.ke/</loc>
-    <lastmod>2026-04-03</lastmod>
+    <loc>https://www.referralninja.co.ke/</loc>
+    <lastmod>2026-04-04</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   
   <!-- Auth Pages -->
   <url>
-    <loc>https://referralninja.co.ke/login</loc>
+    <loc>https://www.referralninja.co.ke/login</loc>
     <lastmod>2026-04-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   
   <url>
-    <loc>https://referralninja.co.ke/signup</loc>
+    <loc>https://www.referralninja.co.ke/signup</loc>
     <lastmod>2026-04-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   
-  <!-- Main App Pages (for logged-in users - lower priority for SEO) -->
+  <!-- Main App Pages -->
   <url>
-    <loc>https://referralninja.co.ke/dashboard</loc>
+    <loc>https://www.referralninja.co.ke/dashboard</loc>
     <lastmod>2026-04-03</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   
   <url>
-    <loc>https://referralninja.co.ke/tasks</loc>
+    <loc>https://www.referralninja.co.ke/tasks</loc>
     <lastmod>2026-04-03</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.7</priority>
   </url>
   
   <url>
-    <loc>https://referralninja.co.ke/referrals</loc>
+    <loc>https://www.referralninja.co.ke/referrals</loc>
     <lastmod>2026-04-03</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
-  
-  <url>
-    <loc>https://referralninja.co.ke/</loc>
-    <lastmod>2026-04-04</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
-  </url>
 
   <url>
-    <loc>https://referralninja.co.ke/mafullu</loc>
+    <loc>https://www.referralninja.co.ke/mafullu</loc>
     <lastmod>2026-04-03</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
