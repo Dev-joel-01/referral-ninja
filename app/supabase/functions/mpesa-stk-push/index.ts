@@ -1,5 +1,5 @@
 // M-Pesa STK Push Edge Function
-// This function initiates an STK push to the user's phone
+// Updated: 2026-04-04 13:57
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 
@@ -16,7 +16,6 @@ interface MpesaConfig {
   callbackUrl: string;
 }
 
-// Get access token from Safaricom
 async function getAccessToken(config: MpesaConfig): Promise<string> {
   const auth = btoa(`${config.consumerKey}:${config.consumerSecret}`);
   
@@ -38,13 +37,11 @@ async function getAccessToken(config: MpesaConfig): Promise<string> {
   return data.access_token;
 }
 
-// Generate password for STK push
 function generatePassword(shortcode: string, passkey: string, timestamp: string): string {
   const str = shortcode + passkey + timestamp;
   return btoa(str);
 }
 
-// Initiate STK push
 async function initiateStkPush(
   accessToken: string,
   config: MpesaConfig,
@@ -56,7 +53,6 @@ async function initiateStkPush(
   const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
   const password = generatePassword(config.shortcode, config.passkey, timestamp);
   
-  // Format phone number (remove 254 prefix if present and add it back)
   const formattedPhone = phoneNumber.startsWith('254') 
     ? phoneNumber 
     : `254${phoneNumber.replace(/^0/, '')}`;
@@ -96,7 +92,6 @@ async function initiateStkPush(
 }
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -104,7 +99,6 @@ serve(async (req) => {
   try {
     const { phoneNumber, amount, accountReference, transactionDesc } = await req.json();
     
-    // Validate inputs
     if (!phoneNumber || !amount || !accountReference) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields' }),
@@ -112,7 +106,6 @@ serve(async (req) => {
       );
     }
     
-    // Get M-Pesa configuration from environment variables
     const config: MpesaConfig = {
       consumerKey: Deno.env.get('MPESA_CONSUMER_KEY') || '',
       consumerSecret: Deno.env.get('MPESA_CONSUMER_SECRET') || '',
@@ -128,11 +121,9 @@ serve(async (req) => {
       );
     }
     
-    // Get access token
     const accessToken = await getAccessToken(config);
     
-    // Initiate STK push
-    const result = await initiateStkPush(
+    const mpesaResponse = await initiateStkPush(
       accessToken,
       config,
       phoneNumber,
@@ -141,11 +132,19 @@ serve(async (req) => {
       transactionDesc || 'Referral Ninja Payment'
     );
     
+    console.log('M-Pesa STK response:', mpesaResponse);
+    
+    // ✅ CRITICAL FIX: Return checkoutRequestId and merchantRequestId in expected format
     return new Response(
       JSON.stringify({
         success: true,
         message: 'STK push initiated successfully',
-        data: result,
+        checkoutRequestId: mpesaResponse.CheckoutRequestID,  // ✅ Matches signup page
+        merchantRequestId: mpesaResponse.MerchantRequestID,    // ✅ Matches signup page
+        responseCode: mpesaResponse.ResponseCode,
+        responseDescription: mpesaResponse.ResponseDescription,
+        // Keep raw data for debugging
+        raw: mpesaResponse,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
