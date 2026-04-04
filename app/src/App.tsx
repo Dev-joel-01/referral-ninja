@@ -6,6 +6,9 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { DemoModeBanner } from '@/components/common/DemoModeBanner';
 
+// Public Pages
+import LandingPage from '@/pages/LandingPage';
+
 // Auth Pages
 import { SignupPage } from '@/pages/SignupPage';
 import { LoginPage } from '@/pages/LoginPage';
@@ -45,19 +48,35 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Layout for public pages (no sidebar, no cursor glow)
+function PublicLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-[#050B06]">
+      {children}
+    </div>
+  );
+}
+
 function App() {
   return (
     <AuthProvider>
       <Router>
         <Routes>
-          {/* Public Routes */}
+          {/* Public Landing Page - NEW */}
+          <Route 
+            path="/" 
+            element={
+              <PublicLayout>
+                <LandingPage />
+              </PublicLayout>
+            } 
+          />
+
+          {/* Public Auth Routes */}
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           
-          {/* Redirect root to dashboard or login */}
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-
           {/* Protected User Routes */}
           <Route
             path="/dashboard"
@@ -182,8 +201,8 @@ function App() {
             }
           />
 
-          {/* 404 Redirect */}
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          {/* 404 Redirect to landing page */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
       <Toaster 
