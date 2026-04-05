@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route,  } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/hooks/useAuth';
 import { CursorGlow } from '@/components/layout/CursorGlow';
@@ -62,7 +62,7 @@ function App() {
     <AuthProvider>
       <Router>
         <Routes>
-          {/* Public Landing Page - NEW */}
+          {/* Public Landing Page */}
           <Route 
             path="/" 
             element={
@@ -72,10 +72,31 @@ function App() {
             } 
           />
 
-          {/* Public Auth Routes */}
-          <Route path="/signup" element={<SignupPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          {/* Public Auth Routes - WRAPPED IN PublicLayout */}
+          <Route 
+            path="/signup" 
+            element={
+              <PublicLayout>
+                <SignupPage />
+              </PublicLayout>
+            } 
+          />
+          <Route 
+            path="/login" 
+            element={
+              <PublicLayout>
+                <LoginPage />
+              </PublicLayout>
+            } 
+          />
+          <Route 
+            path="/forgot-password" 
+            element={
+              <PublicLayout>
+                <ForgotPasswordPage />
+              </PublicLayout>
+            } 
+          />
           
           {/* Protected User Routes */}
           <Route
@@ -201,8 +222,24 @@ function App() {
             }
           />
 
-          {/* 404 Redirect to landing page */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* 404 - Show Not Found Page Instead of Auto-Redirect */}
+          <Route 
+            path="*" 
+            element={
+              <PublicLayout>
+                <div className="min-h-screen flex flex-col items-center justify-center text-ninja-mint p-4">
+                  <h1 className="text-4xl font-bold mb-4">404</h1>
+                  <p className="text-ninja-sage mb-6">Page not found</p>
+                  <a 
+                    href="/" 
+                    className="text-ninja-green hover:underline"
+                  >
+                    Go back home
+                  </a>
+                </div>
+              </PublicLayout>
+            } 
+          />
         </Routes>
       </Router>
       <Toaster 
