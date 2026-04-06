@@ -70,7 +70,7 @@ const usePaymentMonitoring = (
   }, []);
 
   // Start monitoring
-  const startMonitoring = useCallback((phoneNumber: string) => {
+  const startMonitoring = useCallback((_phoneNumber: string) => {  // FIXED: underscore prefix for unused param
     if (!userId) return;
     
     setStatus('verifying');
@@ -142,7 +142,6 @@ const usePaymentMonitoring = (
               .update({ payment_status: 'failed' })
               .eq('id', userId);
 
-            // Note: Cannot delete auth user from client side - requires admin rights
             setStatus('failed');
             onFailure('Payment not received within time limit. Please contact support.');
           }
@@ -223,7 +222,7 @@ export function SignupPage() {
       queryClient.invalidateQueries({ queryKey: ['user'] });
       setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
     },
-    (msg) => {
+    (_msg) => {  // FIXED: underscore prefix for unused param
       // On failure
       setTimeout(() => {
         setShowPaymentDialog(false);
@@ -235,7 +234,7 @@ export function SignupPage() {
   // Cleanup on unmount
   useEffect(() => cleanupPayment, [cleanupPayment]);
 
-  // Signup mutation - UPDATED to use RPC for profile setup
+  // Signup mutation - uses RPC for profile setup
   const signupMutation = useMutation({
     mutationFn: async (data: SignupFormData) => {
       const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -364,7 +363,7 @@ export function SignupPage() {
 
       return { userId, phone: formattedPhone };
     },
-    onSuccess: ({ userId, phone }) => {
+    onSuccess: ({ userId: _userId, phone }) => {  // FIXED: underscore prefix for unused param
       startMonitoring(phone);
     },
     onError: (error: any) => {
