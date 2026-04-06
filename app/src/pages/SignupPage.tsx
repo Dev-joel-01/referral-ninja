@@ -142,9 +142,7 @@ const usePaymentMonitoring = (
               .update({ payment_status: 'failed' })
               .eq('id', userId);
 
-            // Note: Cannot delete auth user from client side
-            // This requires admin rights - handle via edge function or leave for cleanup job
-            
+            // Note: Cannot delete auth user from client side - requires admin rights
             setStatus('failed');
             onFailure('Payment not received within time limit. Please contact support.');
           }
@@ -237,12 +235,12 @@ export function SignupPage() {
   // Cleanup on unmount
   useEffect(() => cleanupPayment, [cleanupPayment]);
 
-  // Signup mutation - UPDATED to use update() instead of insert()
+  // Signup mutation - UPDATED to use RPC for profile setup
   const signupMutation = useMutation({
     mutationFn: async (data: SignupFormData) => {
       const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       
-      // 1. Create auth user (trigger automatically creates profile)
+      // 1. Create auth user (trigger automatically creates profile with basic data)
       const { data: authData, error: authError } = await signUp(
         data.email,
         data.password,
@@ -261,34 +259,31 @@ export function SignupPage() {
 
       const userId = authData.user.id;
 
-      // 2. UPDATE the profile created by trigger (NOT insert)
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          legal_name: data.legalName,
-          username: data.username,
-          email: data.email,
-          phone_number: data.phoneNumber,
-          referral_code: referralCode,
-          referred_by: data.referralCode || null,
-          payment_status: 'pending',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId);
+      // 2. Use RPC to setup/update profile with proper privileges (bypasses RLS)
+      const { error: setupError } = await supabase.rpc('setup_user_profile', {
+        p_user_id: userId,
+        p_legal_name: data.legalName,
+        p_username: data.username,
+        p_email: data.email,
+        p_phone_number: data.phoneNumber,
+        p_referral_code: referralCode,
+        p_referred_by: data.referralCode || null,
+      });
 
-      if (profileError) {
-        throw profileError;
+      if (setupError) {
+        throw setupError;
       }
 
-      // 3. Upload avatar if provided
+      // 3. Upload avatar if provided (optional, don't fail if this errors)
       if (avatarFile) {
         try {
           const avatarUrl = await uploadAvatar(userId, avatarFile);
           if (avatarUrl) {
-            await supabase
-              .from('profiles')
-              .update({ avatar_url: avatarUrl })
-              .eq('id', userId);
+            // Use RPC to update avatar as well (safer for initial setup)
+            await supabase.rpc('update_user_avatar', {
+              p_user_id: userId,
+              p_avatar_url: avatarUrl,
+            });
           }
         } catch (avatarError) {
           console.error('Avatar upload error:', avatarError);
@@ -296,7 +291,7 @@ export function SignupPage() {
         }
       }
 
-      // 4. Create referral record if referral code provided
+      // 4. Create referral record if referral code provided (optional)
       if (data.referralCode) {
         try {
           const { data: referrer } = await supabase
