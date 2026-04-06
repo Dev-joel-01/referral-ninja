@@ -44,10 +44,7 @@ export function LoginPage() {
     try {
       const { data: authData, error } = await signIn(data.email, data.password);
       
-      if (error) {
-        throw error;
-      }
-
+      if (error) throw error;
       if (authData.user) {
         navigate(from, { replace: true });
       }
@@ -88,7 +85,7 @@ export function LoginPage() {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             {/* Error Message */}
             {loginError && (
-              <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+              <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm animate-in fade-in">
                 {loginError}
               </div>
             )}
@@ -105,9 +102,10 @@ export function LoginPage() {
                   type="email"
                   {...register('email')}
                   placeholder="john@example.com"
+                  autoComplete="email"
                   className={cn(
                     'input-field pl-10',
-                    errors.email && 'border-red-500/50'
+                    errors.email && 'border-red-500/50 focus-visible:ring-red-500/20'
                   )}
                 />
               </div>
@@ -136,15 +134,17 @@ export function LoginPage() {
                   type={showPassword ? 'text' : 'password'}
                   {...register('password')}
                   placeholder="••••••••"
+                  autoComplete="current-password"
                   className={cn(
                     'input-field pl-10 pr-10',
-                    errors.password && 'border-red-500/50'
+                    errors.password && 'border-red-500/50 focus-visible:ring-red-500/20'
                   )}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ninja-sage hover:text-ninja-mint"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ninja-sage hover:text-ninja-mint transition-colors"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>

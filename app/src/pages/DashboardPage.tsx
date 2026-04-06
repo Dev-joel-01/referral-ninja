@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useCallback } from 'react';
 import { 
   Briefcase, 
   Users, 
@@ -10,10 +10,12 @@ import {
   ExternalLink,
   Award
 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -32,100 +34,192 @@ interface TopReferrer {
   referral_count: number;
 }
 
+// Query keys for granular cache control
+const dashboardKeys = {
+  all: ['dashboard'] as const,
+  stats: (userId: string) => [...dashboardKeys.all, 'stats', userId] as const,
+  topReferrers: () => [...dashboardKeys.all, 'topReferrers'] as const,
+};
+
+// Parallel data fetching - all requests fire simultaneously
+const fetchDashboardStats = async (userId: string): Promise<DashboardStats> => {
+  // Fire all independent queries in parallel
+  const [taskClicksResult, referralsResult, withdrawalsResult] = await Promise.all([
+    // Task clicks count
+    supabase
+      .from('task_clicks')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId),
+    
+    // Referrals (we need the actual data to count)
+    supabase
+      .from('referrals')
+      .select('id, earned_amount')
+      .eq('referrer_id', userId)
+      .eq('status', 'completed'),
+    
+    // Withdrawals
+    supabase
+      .from('withdrawals')
+      .select('amount')
+      .eq('user_id', userId)
+      .eq('status', 'completed'),
+  ]);
+
+  // Handle errors
+  if (taskClicksResult.error) throw taskClicksResult.error;
+  if (referralsResult.error) throw referralsResult.error;
+  if (withdrawalsResult.error) throw withdrawalsResult.error;
+
+  const referralCount = referralsResult.data?.length || 0;
+  const totalEarned = referralsResult.data?.reduce((sum, r) => sum + (r.earned_amount || 0), 0) || 0;
+  const totalWithdrawn = withdrawalsResult.data?.reduce((sum, w) => sum + w.amount, 0) || 0;
+
+  return {
+    tasksApplied: taskClicksResult.count || 0,
+    referrals: referralCount,
+    totalEarned,
+    totalWithdrawn,
+    availableBalance: totalEarned - totalWithdrawn,
+  };
+};
+
+// Optimized top referrers - single query with join or efficient batch
+const fetchTopReferrers = async (): Promise<TopReferrer[]> => {
+  // Option 1: Use the database view we created earlier
+  const { data, error } = await supabase
+    .from('user_stats_view')
+    .select('id, username, avatar_url, referral_count')
+    .eq('payment_status', 'completed')
+    .order('referral_count', { ascending: false })
+    .limit(5);
+
+  if (error) throw error;
+  
+  return (data || []).map(u => ({
+    ...u,
+    referral_count: u.referral_count || 0,
+  }));
+};
+
+// Alternative without view - batch fetch (still efficient)
+const fetchTopReferrersBatch = async (): Promise<TopReferrer[]> => {
+  // Get paid users first
+  const { data: profiles, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, username, avatar_url')
+    .eq('payment_status', 'completed')
+    .limit(20); // Get more than 5 to account for zero-referral users
+
+  if (profileError) throw profileError;
+  if (!profiles?.length) return [];
+
+  // Single batch query for all referral counts
+  const userIds = profiles.map(p => p.id);
+  const { data: referrals, error: refError } = await supabase
+    .from('referrals')
+    .select('referrer_id')
+    .in('referrer_id', userIds)
+    .eq('status', 'completed');
+
+  if (refError) throw refError;
+
+  // Aggregate in memory
+  const countMap = new Map<string, number>();
+  referrals?.forEach(r => {
+    countMap.set(r.referrer_id, (countMap.get(r.referrer_id) || 0) + 1);
+  });
+
+  // Map and sort
+  return profiles
+    .map(p => ({
+      ...p,
+      referral_count: countMap.get(p.id) || 0,
+    }))
+    .sort((a, b) => b.referral_count - a.referral_count)
+    .slice(0, 5);
+};
+
 export function DashboardPage() {
   const { user } = useAuth();
-  const [stats, setStats] = useState<DashboardStats>({
-    tasksApplied: 0,
-    referrals: 0,
-    totalEarned: 0,
-    totalWithdrawn: 0,
-    availableBalance: 0,
+  const queryClient = useQueryClient();
+
+  // Stats query with background refresh
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    isFetching: statsFetching,
+    error: statsError,
+  } = useQuery({
+    queryKey: dashboardKeys.stats(user?.id || ''),
+    queryFn: () => fetchDashboardStats(user!.id),
+    enabled: !!user,
+    staleTime: 30 * 1000, // 30 seconds - balance between fresh and fast
+    gcTime: 5 * 60 * 1000,
+    refetchInterval: 60 * 1000, // Auto-refresh every minute for real-time earnings
+    refetchOnWindowFocus: true,
   });
-  const [topReferrers, setTopReferrers] = useState<TopReferrer[]>([]);
-  const [copied, setCopied] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
 
-  const referralLink = user ? `${window.location.origin}/signup?ref=${user.referral_code}` : '';
+  // Top referrers query (shared across all users - good for caching)
+  const {
+    data: topReferrers = [],
+    isLoading: referrersLoading,
+  } = useQuery({
+    queryKey: dashboardKeys.topReferrers(),
+    queryFn: fetchTopReferrers,
+    staleTime: 5 * 60 * 1000, // 5 minutes - doesn't change often
+    gcTime: 10 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    if (user) {
-      fetchDashboardData();
-    }
+  // Copy link with optimistic UI
+  const [copied, setCopied] = useMemo(() => {
+    let timeout: NodeJS.Timeout;
+    return [
+      false,
+      (value: boolean) => {
+        clearTimeout(timeout);
+        if (value) {
+          timeout = setTimeout(() => setCopied(false), 2000);
+        }
+      }
+    ];
+  }, []);
+
+  const referralLink = useMemo(() => {
+    if (!user) return '';
+    return `${window.location.origin}/signup?ref=${user.referral_code}`;
   }, [user]);
 
-  const fetchDashboardData = async () => {
-    setIsLoading(true);
-    try {
-      // Fetch task clicks count
-      const { count: tasksApplied } = await supabase
-        .from('task_clicks')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user!.id);
-
-      // Fetch referrals
-      const { data: referrals } = await supabase
-        .from('referrals')
-        .select('*')
-        .eq('referrer_id', user!.id)
-        .eq('status', 'completed');
-
-      const referralCount = referrals?.length || 0;
-      const totalEarned = referralCount * 100; // KSh 100 per referral (50% of 200)
-
-      // Fetch withdrawals
-      const { data: withdrawals } = await supabase
-        .from('withdrawals')
-        .select('amount')
-        .eq('user_id', user!.id)
-        .eq('status', 'completed');
-
-      const totalWithdrawn = withdrawals?.reduce((sum, w) => sum + w.amount, 0) || 0;
-
-      setStats({
-        tasksApplied: tasksApplied || 0,
-        referrals: referralCount,
-        totalEarned,
-        totalWithdrawn,
-        availableBalance: totalEarned - totalWithdrawn,
-      });
-
-      // Fetch top referrers
-      const { data: topRefs } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .eq('payment_status', 'completed')
-        .limit(5);
-
-      // Get referral counts for each
-      const topRefsWithCount = await Promise.all(
-        (topRefs || []).map(async (ref) => {
-          const { count } = await supabase
-            .from('referrals')
-            .select('*', { count: 'exact', head: true })
-            .eq('referrer_id', ref.id)
-            .eq('status', 'completed');
-          return { ...ref, referral_count: count || 0 };
-        })
-      );
-
-      setTopReferrers(topRefsWithCount.sort((a, b) => b.referral_count - a.referral_count));
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const copyReferralLink = () => {
+  const copyReferralLink = useCallback(() => {
     navigator.clipboard.writeText(referralLink);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  }, [referralLink, setCopied]);
 
-  if (isLoading) {
+  // Manual refresh handler
+  const refreshDashboard = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: dashboardKeys.stats(user?.id || '') });
+  }, [queryClient, user?.id]);
+
+  // Loading state component
+  const StatSkeleton = () => (
+    <GlassCard padding="md">
+      <div className="flex items-start justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-20 bg-ninja-green/10" />
+          <Skeleton className="h-8 w-16 bg-ninja-green/10" />
+        </div>
+        <Skeleton className="h-10 w-10 rounded-xl bg-ninja-green/10" />
+      </div>
+    </GlassCard>
+  );
+
+  if (statsError) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-ninja-green" />
+      <div className="p-8 text-center">
+        <p className="text-red-500">Failed to load dashboard data</p>
+        <Button onClick={refreshDashboard} className="mt-4">
+          Retry
+        </Button>
       </div>
     );
   }
@@ -155,60 +249,82 @@ export function DashboardPage() {
             <p className="text-ninja-sage flex items-center gap-2">
               <Calendar className="w-4 h-4" />
               Joined {user?.joined_at ? format(new Date(user.joined_at), 'dd MMM yyyy') : 'N/A'}
+              {statsFetching && <span className="text-xs animate-pulse">(updating...)</span>}
             </p>
           </div>
         </div>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={refreshDashboard}
+          disabled={statsFetching}
+        >
+          {statsFetching ? 'Refreshing...' : 'Refresh'}
+        </Button>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <GlassCard padding="md" hover>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="stat-label mb-1">Tasks Applied</p>
-              <p className="stat-value">{stats.tasksApplied}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
-              <Briefcase className="w-5 h-5 text-ninja-green" />
-            </div>
-          </div>
-        </GlassCard>
+        {statsLoading ? (
+          <>
+            <StatSkeleton />
+            <StatSkeleton />
+            <StatSkeleton />
+            <StatSkeleton />
+          </>
+        ) : (
+          <>
+            <GlassCard padding="md" hover>
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="stat-label mb-1">Tasks Applied</p>
+                  <p className="stat-value">{stats?.tasksApplied}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
+                  <Briefcase className="w-5 h-5 text-ninja-green" />
+                </div>
+              </div>
+            </GlassCard>
 
-        <GlassCard padding="md" hover>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="stat-label mb-1">Referrals</p>
-              <p className="stat-value">{stats.referrals}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
-              <Users className="w-5 h-5 text-ninja-green" />
-            </div>
-          </div>
-        </GlassCard>
+            <GlassCard padding="md" hover>
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="stat-label mb-1">Referrals</p>
+                  <p className="stat-value">{stats?.referrals}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
+                  <Users className="w-5 h-5 text-ninja-green" />
+                </div>
+              </div>
+            </GlassCard>
 
-        <GlassCard padding="md" hover>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="stat-label mb-1">Total Earned</p>
-              <p className="stat-value">KSh {stats.totalEarned.toLocaleString()}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-ninja-green" />
-            </div>
-          </div>
-        </GlassCard>
+            <GlassCard padding="md" hover>
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="stat-label mb-1">Total Earned</p>
+                  <p className="stat-value">KSh {stats?.totalEarned.toLocaleString()}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
+                  <TrendingUp className="w-5 h-5 text-ninja-green" />
+                </div>
+              </div>
+            </GlassCard>
 
-        <GlassCard padding="md" hover className="border-ninja-green/40">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="stat-label mb-1 text-ninja-green">Available</p>
-              <p className="stat-value text-ninja-green">KSh {stats.availableBalance.toLocaleString()}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-ninja-green/30 flex items-center justify-center">
-              <Wallet className="w-5 h-5 text-ninja-green" />
-            </div>
-          </div>
-        </GlassCard>
+            <GlassCard padding="md" hover className="border-ninja-green/40">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="stat-label mb-1 text-ninja-green">Available</p>
+                  <p className="stat-value text-ninja-green">
+                    KSh {stats?.availableBalance.toLocaleString()}
+                  </p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-ninja-green/30 flex items-center justify-center">
+                  <Wallet className="w-5 h-5 text-ninja-green" />
+                </div>
+              </div>
+            </GlassCard>
+          </>
+        )}
       </div>
 
       {/* Main Content Grid */}
@@ -272,41 +388,53 @@ export function DashboardPage() {
           </div>
           
           <div className="space-y-3">
-            {topReferrers.map((referrer, index) => (
-              <div
-                key={referrer.id}
-                className="flex items-center gap-3 p-3 rounded-xl bg-ninja-black/50 border border-ninja-green/10"
-              >
-                <div className={cn(
-                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold',
-                  index === 0 && 'bg-yellow-500/20 text-yellow-400',
-                  index === 1 && 'bg-gray-400/20 text-gray-300',
-                  index === 2 && 'bg-orange-600/20 text-orange-400',
-                  index > 2 && 'bg-ninja-green/20 text-ninja-green'
-                )}>
-                  {index + 1}
+            {referrersLoading ? (
+              [1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="flex items-center gap-3 p-3">
+                  <Skeleton className="h-8 w-8 rounded-full bg-ninja-green/10" />
+                  <Skeleton className="h-10 w-10 rounded-full bg-ninja-green/10" />
+                  <div className="flex-1 space-y-1">
+                    <Skeleton className="h-4 w-24 bg-ninja-green/10" />
+                    <Skeleton className="h-3 w-16 bg-ninja-green/10" />
+                  </div>
                 </div>
-                <div className="w-10 h-10 rounded-full bg-ninja-green/20 flex items-center justify-center overflow-hidden">
-                  {referrer.avatar_url ? (
-                    <img 
-                      src={referrer.avatar_url} 
-                      alt={referrer.username}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-ninja-green font-medium">
-                      {referrer.username.charAt(0).toUpperCase()}
-                    </span>
-                  )}
+              ))
+            ) : topReferrers.length > 0 ? (
+              topReferrers.map((referrer, index) => (
+                <div
+                  key={referrer.id}
+                  className="flex items-center gap-3 p-3 rounded-xl bg-ninja-black/50 border border-ninja-green/10 hover:bg-ninja-green/5 transition-colors"
+                >
+                  <div className={cn(
+                    'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold',
+                    index === 0 && 'bg-yellow-500/20 text-yellow-400',
+                    index === 1 && 'bg-gray-400/20 text-gray-300',
+                    index === 2 && 'bg-orange-600/20 text-orange-400',
+                    index > 2 && 'bg-ninja-green/20 text-ninja-green'
+                  )}>
+                    {index + 1}
+                  </div>
+                  <div className="w-10 h-10 rounded-full bg-ninja-green/20 flex items-center justify-center overflow-hidden">
+                    {referrer.avatar_url ? (
+                      <img 
+                        src={referrer.avatar_url} 
+                        alt={referrer.username}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span className="text-ninja-green font-medium">
+                        {referrer.username.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-ninja-mint font-medium truncate">@{referrer.username}</p>
+                    <p className="text-ninja-sage text-sm">{referrer.referral_count} referrals</p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-ninja-mint font-medium truncate">@{referrer.username}</p>
-                  <p className="text-ninja-sage text-sm">{referrer.referral_count} referrals</p>
-                </div>
-              </div>
-            ))}
-            
-            {topReferrers.length === 0 && (
+              ))
+            ) : (
               <p className="text-ninja-sage text-center py-4">No referrers yet</p>
             )}
           </div>
@@ -315,10 +443,7 @@ export function DashboardPage() {
 
       {/* Quick Actions */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <a 
-          href="/tasks"
-          className="glass-card-hover p-4 flex items-center gap-3"
-        >
+        <a href="/tasks" className="glass-card-hover p-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
             <Briefcase className="w-5 h-5 text-ninja-green" />
           </div>
@@ -329,10 +454,7 @@ export function DashboardPage() {
           <ExternalLink className="w-4 h-4 text-ninja-sage ml-auto" />
         </a>
 
-        <a 
-          href="/referrals"
-          className="glass-card-hover p-4 flex items-center gap-3"
-        >
+        <a href="/referrals" className="glass-card-hover p-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
             <Users className="w-5 h-5 text-ninja-green" />
           </div>
@@ -343,10 +465,7 @@ export function DashboardPage() {
           <ExternalLink className="w-4 h-4 text-ninja-sage ml-auto" />
         </a>
 
-        <a 
-          href="/payments"
-          className="glass-card-hover p-4 flex items-center gap-3"
-        >
+        <a href="/payments" className="glass-card-hover p-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
             <Wallet className="w-5 h-5 text-ninja-green" />
           </div>
@@ -357,10 +476,7 @@ export function DashboardPage() {
           <ExternalLink className="w-4 h-4 text-ninja-sage ml-auto" />
         </a>
 
-        <a 
-          href="/profile"
-          className="glass-card-hover p-4 flex items-center gap-3"
-        >
+        <a href="/profile" className="glass-card-hover p-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-ninja-green/20 flex items-center justify-center">
             <Calendar className="w-5 h-5 text-ninja-green" />
           </div>

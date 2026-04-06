@@ -1,18 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useState, useCallback } from 'react';
 import { 
   FileText, 
   Lock, 
   Download, 
   Check, 
   Loader2,
-  Smartphone
+  Smartphone,
+  RefreshCw
 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
 
 interface MafulluContent {
   id: string;
@@ -29,60 +33,80 @@ interface MafulluPurchase {
   payment_status: string;
 }
 
+// Query keys
+const mafulluKeys = {
+  all: ['mafullu'] as const,
+  purchases: (userId: string) => [...mafulluKeys.all, 'purchases', userId] as const,
+  available: () => [...mafulluKeys.all, 'available'] as const,
+};
+
+// Fetch user's purchases
+const fetchPurchases = async (userId: string): Promise<MafulluPurchase[]> => {
+  const { data, error } = await supabase
+    .from('mafullu_purchases')
+    .select('*, content:mafullu_content(*)')
+    .eq('user_id', userId)
+    .eq('payment_status', 'completed')
+    .order('purchased_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []) as MafulluPurchase[];
+};
+
+// Check available content
+const fetchAvailableContent = async () => {
+  const { data, error } = await supabase
+    .from('mafullu_content')
+    .select('*')
+    .eq('is_purchased', false)
+    .limit(1)
+    .single();
+
+  if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows
+  return data;
+};
+
 export function MafulluPage() {
   const { user } = useAuth();
-  const [purchases, setPurchases] = useState<MafulluPurchase[]>([]);
+  const queryClient = useQueryClient();
   const [showPurchaseDialog, setShowPurchaseDialog] = useState(false);
   const [showContentDialog, setShowContentDialog] = useState(false);
   const [selectedContent, setSelectedContent] = useState<MafulluContent | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isPurchasing, setIsPurchasing] = useState(false);
-  const [paymentStatus, setPaymentStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
-  const [message, setMessage] = useState('');
+  const [purchaseStatus, setPurchaseStatus] = useState<'idle' | 'processing' | 'polling' | 'success' | 'error'>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
 
-  useEffect(() => {
-    if (user) {
-      fetchPurchases();
-    }
-  }, [user]);
+  // Purchases query
+  const {
+    data: purchases = [],
+    isLoading,
+    isFetching,
+    error,
+  } = useQuery({
+    queryKey: mafulluKeys.purchases(user?.id || ''),
+    queryFn: () => fetchPurchases(user!.id),
+    enabled: !!user,
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
+  });
 
-  const fetchPurchases = async () => {
-    setIsLoading(true);
-    try {
-      const { data } = await supabase
-        .from('mafullu_purchases')
-        .select('*, content:mafullu_content(*)')
-        .eq('user_id', user!.id)
-        .eq('payment_status', 'completed')
-        .order('purchased_at', { ascending: false });
+  // Available content query
+  const {
+    data: availableContent,
+    isLoading: isCheckingAvailability,
+  } = useQuery({
+    queryKey: mafulluKeys.available(),
+    queryFn: fetchAvailableContent,
+    staleTime: 30 * 1000,
+    enabled: showPurchaseDialog, // Only check when dialog opens
+  });
 
-      if (data) {
-        setPurchases(data as MafulluPurchase[]);
-      }
-    } catch (error) {
-      console.error('Error fetching purchases:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handlePurchase = async () => {
-    setIsPurchasing(true);
-    setPaymentStatus('processing');
-    setMessage('Processing payment...');
-
-    try {
-      // Get available content
-      const { data: availableContent, error: contentError } = await supabase
-        .from('mafullu_content')
-        .select('*')
-        .eq('is_purchased', false)
-        .limit(1)
-        .single();
-
-      if (contentError || !availableContent) {
-        throw new Error('No Mafullu content available at the moment');
-      }
+  // Purchase mutation with polling
+  const purchaseMutation = useMutation({
+    mutationFn: async () => {
+      if (!availableContent) throw new Error('No content available');
+      
+      setPurchaseStatus('processing');
+      setStatusMessage('Initiating payment...');
 
       // Create purchase record
       const { data: purchase, error: purchaseError } = await supabase
@@ -98,7 +122,7 @@ export function MafulluPage() {
 
       if (purchaseError) throw purchaseError;
 
-      // Initiate M-Pesa payment
+      // Initiate M-Pesa
       const { error: mpesaError } = await supabase.functions.invoke('mpesa-stk-push', {
         body: {
           phoneNumber: user!.phone_number,
@@ -110,63 +134,77 @@ export function MafulluPage() {
 
       if (mpesaError) {
         console.error('M-Pesa error:', mpesaError);
+        // Don't throw - M-Pesa might still work via callback
       }
 
+      setPurchaseStatus('polling');
+      setStatusMessage('Waiting for M-Pesa confirmation... Check your phone!');
+
       // Poll for payment status
-      let attempts = 0;
-      const maxAttempts = 12; // 60 seconds
-      
-      const checkPayment = setInterval(async () => {
-        attempts++;
+      return new Promise<void>((resolve, reject) => {
+        let attempts = 0;
+        const maxAttempts = 12; // 60 seconds
         
-        const { data: paymentStatus } = await supabase
-          .from('mafullu_purchases')
-          .select('payment_status')
-          .eq('id', purchase.id)
-          .single();
-
-        if (paymentStatus?.payment_status === 'completed') {
-          clearInterval(checkPayment);
+        const poll = setInterval(async () => {
+          attempts++;
           
-          // Mark content as purchased
-          await supabase
-            .from('mafullu_content')
-            .update({ 
-              is_purchased: true, 
-              purchased_by: user!.id,
-              purchased_at: new Date().toISOString(),
-            })
-            .eq('id', availableContent.id);
+          const { data: statusData } = await supabase
+            .from('mafullu_purchases')
+            .select('payment_status')
+            .eq('id', purchase.id)
+            .single();
 
-          setPaymentStatus('success');
-          setMessage('Payment successful! Your content is ready.');
-          fetchPurchases();
-          
-          setTimeout(() => {
-            setShowPurchaseDialog(false);
-            setPaymentStatus('idle');
-          }, 2000);
-        } else if (attempts >= maxAttempts) {
-          clearInterval(checkPayment);
-          setPaymentStatus('error');
-          setMessage('Payment timeout. Please try again.');
-        }
-      }, 5000);
+          if (statusData?.payment_status === 'completed') {
+            clearInterval(poll);
+            
+            // Mark content as purchased
+            await supabase
+              .from('mafullu_content')
+              .update({ 
+                is_purchased: true, 
+                purchased_by: user!.id,
+                purchased_at: new Date().toISOString(),
+              })
+              .eq('id', availableContent.id);
 
-    } catch (error: any) {
-      setPaymentStatus('error');
-      setMessage(error.message || 'Failed to process purchase');
-    } finally {
-      setIsPurchasing(false);
-    }
-  };
+            resolve();
+          } else if (attempts >= maxAttempts) {
+            clearInterval(poll);
+            reject(new Error('Payment timeout. Please check your M-Pesa messages.'));
+          }
+        }, 5000);
+      });
+    },
+    onSuccess: () => {
+      setPurchaseStatus('success');
+      setStatusMessage('Payment successful! Your content is ready.');
+      
+      // Invalidate queries to refresh data
+      queryClient.invalidateQueries({ queryKey: mafulluKeys.all });
+      
+      // Close dialog after delay
+      setTimeout(() => {
+        setShowPurchaseDialog(false);
+        setPurchaseStatus('idle');
+        setStatusMessage('');
+      }, 2000);
+    },
+    onError: (error: any) => {
+      setPurchaseStatus('error');
+      setStatusMessage(error.message || 'Failed to process purchase');
+    },
+  });
 
-  const viewContent = (content: MafulluContent) => {
+  const handlePurchase = useCallback(() => {
+    purchaseMutation.mutate();
+  }, [purchaseMutation]);
+
+  const viewContent = useCallback((content: MafulluContent) => {
     setSelectedContent(content);
     setShowContentDialog(true);
-  };
+  }, []);
 
-  const downloadContent = () => {
+  const downloadContent = useCallback(() => {
     if (!selectedContent) return;
     
     const content = `
@@ -185,50 +223,98 @@ Downloaded from Referral Ninja on ${format(new Date(), 'dd MMMM yyyy')}
     link.download = `${selectedContent.title.replace(/\s+/g, '-').toLowerCase()}.txt`;
     link.click();
     URL.revokeObjectURL(url);
-  };
+  }, [selectedContent]);
+
+  const refreshData = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: mafulluKeys.all });
+  }, [queryClient]);
+
+  const hasContentAvailable = !!availableContent && !isCheckingAvailability;
+
+  // Loading skeletons
+  const PurchaseSkeleton = () => (
+    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+      <div className="flex items-start gap-4">
+        <Skeleton className="h-16 w-16 rounded-2xl bg-ninja-green/10" />
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-48 bg-ninja-green/10" />
+          <Skeleton className="h-4 w-64 bg-ninja-green/10" />
+          <Skeleton className="h-8 w-24 bg-ninja-green/10" />
+        </div>
+      </div>
+      <Skeleton className="h-14 w-32 bg-ninja-green/10" />
+    </div>
+  );
+
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-red-500">Failed to load purchases</p>
+        <Button onClick={refreshData} className="mt-4">
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-heading font-light text-ninja-mint">Mafullu</h1>
-        <p className="text-ninja-sage">Unlock exclusive curated content</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-heading font-light text-ninja-mint">Mafullu</h1>
+          <p className="text-ninja-sage">Unlock exclusive curated content</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={refreshData}
+          disabled={isFetching}
+        >
+          <RefreshCw className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
+          {isFetching ? 'Updating...' : 'Refresh'}
+        </Button>
       </div>
 
       {/* Purchase Card */}
       <GlassCard padding="lg" className="border-ninja-green/30">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          <div className="flex items-start gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-ninja-green/20 flex items-center justify-center border border-ninja-green/30">
-              <Lock className="w-8 h-8 text-ninja-green" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-heading text-ninja-mint mb-1">
-                Unlock Premium Content
-              </h2>
-              <p className="text-ninja-sage max-w-md">
-                Get access to curated info packs including vetted remote openings, 
-                local internship contacts, and quick application templates.
-              </p>
-              <div className="flex items-center gap-4 mt-3">
-                <span className="text-3xl font-heading text-ninja-green">
-                  KSh 300
-                </span>
-                <span className="text-ninja-sage text-sm">
-                  One-time purchase
-                </span>
+        {isLoading ? (
+          <PurchaseSkeleton />
+        ) : (
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+            <div className="flex items-start gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-ninja-green/20 flex items-center justify-center border border-ninja-green/30">
+                <Lock className="w-8 h-8 text-ninja-green" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-heading text-ninja-mint mb-1">
+                  Unlock Premium Content
+                </h2>
+                <p className="text-ninja-sage max-w-md">
+                  Get access to curated info packs including vetted remote openings, 
+                  local internship contacts, and quick application templates.
+                </p>
+                <div className="flex items-center gap-4 mt-3">
+                  <span className="text-3xl font-heading text-ninja-green">
+                    KSh 300
+                  </span>
+                  <span className="text-ninja-sage text-sm">
+                    One-time purchase
+                  </span>
+                </div>
               </div>
             </div>
+            
+            <Button
+              onClick={() => setShowPurchaseDialog(true)}
+              className="btn-primary h-14 px-8 text-lg"
+            >
+              <Lock className="w-5 h-5 mr-2" />
+              Unlock Now
+            </Button>
           </div>
-          
-          <Button
-            onClick={() => setShowPurchaseDialog(true)}
-            className="btn-primary h-14 px-8 text-lg"
-          >
-            <Lock className="w-5 h-5 mr-2" />
-            Unlock Now
-          </Button>
-        </div>
+        )}
       </GlassCard>
 
       {/* My Purchases */}
@@ -236,8 +322,10 @@ Downloaded from Referral Ninja on ${format(new Date(), 'dd MMMM yyyy')}
         <h2 className="text-xl font-heading text-ninja-mint mb-4">My Purchases</h2>
         
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-8 h-8 text-ninja-green animate-spin" />
+          <div className="grid md:grid-cols-2 gap-4">
+            {[1, 2].map((i) => (
+              <Skeleton key={i} className="h-24 w-full bg-ninja-green/5 rounded-xl" />
+            ))}
           </div>
         ) : purchases.length > 0 ? (
           <div className="grid md:grid-cols-2 gap-4">
@@ -297,17 +385,18 @@ Downloaded from Referral Ninja on ${format(new Date(), 'dd MMMM yyyy')}
               <p className="text-ninja-sage text-sm">One-time purchase</p>
             </div>
 
-            {message && (
-              <div className={`
-                p-3 rounded-xl text-sm text-center w-full
-                ${paymentStatus === 'success' 
-                  ? 'bg-ninja-green/10 border border-ninja-green/30 text-ninja-green'
-                  : paymentStatus === 'error'
-                  ? 'bg-red-500/10 border border-red-500/30 text-red-400'
-                  : 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
-                }
-              `}>
-                {message}
+            {statusMessage && (
+              <div className={cn(
+                'p-3 rounded-xl text-sm text-center w-full',
+                purchaseStatus === 'success' && 'bg-ninja-green/10 border border-ninja-green/30 text-ninja-green',
+                purchaseStatus === 'error' && 'bg-red-500/10 border border-red-500/30 text-red-400',
+                purchaseStatus === 'polling' && 'bg-blue-500/10 border border-blue-500/30 text-blue-400 animate-pulse',
+                purchaseStatus === 'processing' && 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
+              )}>
+                {purchaseStatus === 'polling' && (
+                  <Loader2 className="w-4 h-4 inline mr-2 animate-spin" />
+                )}
+                {statusMessage}
               </div>
             )}
 
@@ -316,22 +405,28 @@ Downloaded from Referral Ninja on ${format(new Date(), 'dd MMMM yyyy')}
                 <Smartphone className="w-5 h-5 text-ninja-green" />
                 <div>
                   <p className="text-ninja-sage text-sm">Payment method</p>
-                  <p className="text-ninja-mint">M-Pesa ({user?.phone_number})</p>
+                  <p className="text-ninja-mint">{user?.phone_number}</p>
                 </div>
               </div>
+              
+              {!hasContentAvailable && !isCheckingAvailability && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm text-center">
+                  No content available at the moment. Please check back later.
+                </div>
+              )}
             </div>
 
             <Button
               onClick={handlePurchase}
-              disabled={isPurchasing || paymentStatus === 'success'}
+              disabled={purchaseMutation.isPending || purchaseStatus === 'success' || !hasContentAvailable}
               className="btn-primary w-full h-12"
             >
-              {isPurchasing ? (
+              {purchaseMutation.isPending || purchaseStatus === 'polling' ? (
                 <>
                   <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                   Processing...
                 </>
-              ) : paymentStatus === 'success' ? (
+              ) : purchaseStatus === 'success' ? (
                 <>
                   <Check className="w-5 h-5 mr-2" />
                   Completed!
@@ -368,6 +463,7 @@ Downloaded from Referral Ninja on ${format(new Date(), 'dd MMMM yyyy')}
                           src={img} 
                           alt={`${selectedContent.title} - ${idx + 1}`}
                           className="w-full h-full object-cover"
+                          loading="lazy"
                         />
                       </div>
                     ))}

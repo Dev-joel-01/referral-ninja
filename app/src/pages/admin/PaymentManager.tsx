@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { 
   Wallet, 
   CheckCircle, 
@@ -7,12 +7,15 @@ import {
   ArrowDownLeft,
   User,
   Calendar,
-  Smartphone
+  Smartphone,
+  RefreshCw
 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -31,92 +34,171 @@ interface WithdrawalWithUser {
   };
 }
 
-export function PaymentManager() {
-  const [withdrawals, setWithdrawals] = useState<WithdrawalWithUser[]>([]);
-  const [pendingWithdrawals, setPendingWithdrawals] = useState<WithdrawalWithUser[]>([]);
-  const [showApproveDialog, setShowApproveDialog] = useState(false);
-  const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalWithUser | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+// Query keys
+const paymentKeys = {
+  all: ['payments'] as const,
+  withdrawals: () => [...paymentKeys.all, 'withdrawals'] as const,
+  stats: () => [...paymentKeys.all, 'stats'] as const,
+};
 
-  useEffect(() => {
-    fetchWithdrawals();
-  }, []);
+// Single efficient query with join
+const fetchWithdrawals = async (): Promise<WithdrawalWithUser[]> => {
+  const { data, error } = await supabase
+    .from('withdrawals')
+    .select(`
+      *,
+      user:profiles(legal_name, username, email)
+    `)
+    .order('requested_at', { ascending: false });
 
-  const fetchWithdrawals = async () => {
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('withdrawals')
-        .select('*, user:profiles(legal_name, username, email)')
-        .order('requested_at', { ascending: false });
+  if (error) throw error;
+  return (data || []) as WithdrawalWithUser[];
+};
 
-      if (error) throw error;
-
-      const allWithdrawals = (data || []) as WithdrawalWithUser[];
-      setWithdrawals(allWithdrawals);
-      setPendingWithdrawals(allWithdrawals.filter((w) => w.status === 'pending'));
-    } catch (error) {
-      console.error('Error fetching withdrawals:', error);
-    } finally {
-      setIsLoading(false);
-    }
+// Optimized stats calculation (client-side to reduce queries)
+const calculateStats = (withdrawals: WithdrawalWithUser[]) => {
+  const completed = withdrawals.filter(w => w.status === 'completed');
+  return {
+    total: withdrawals.length,
+    pending: withdrawals.filter(w => w.status === 'pending').length,
+    completed: completed.length,
+    totalAmount: completed.reduce((sum, w) => sum + w.amount, 0),
   };
+};
 
-  const approveWithdrawal = async () => {
-    if (!selectedWithdrawal) return;
+export function PaymentManager() {
+  const queryClient = useQueryClient();
+  const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalWithUser | null>(null);
+  const [showDialog, setShowDialog] = useState(false);
 
-    setIsProcessing(true);
-    try {
-      const { error } = await supabase
+  // Main withdrawals query with real-time updates
+  const {
+    data: withdrawals = [],
+    isLoading,
+    isFetching,
+    error,
+  } = useQuery({
+    queryKey: paymentKeys.withdrawals(),
+    queryFn: fetchWithdrawals,
+    staleTime: 30 * 1000, // 30 seconds
+    gcTime: 5 * 60 * 1000,
+    refetchInterval: 30 * 1000, // Auto-refresh for admin monitoring
+  });
+
+  // Derived stats (auto-updates when withdrawals change)
+  const stats = useMemo(() => calculateStats(withdrawals), [withdrawals]);
+
+  // Derived lists (no additional queries)
+  const pendingWithdrawals = useMemo(
+    () => withdrawals.filter(w => w.status === 'pending'),
+    [withdrawals]
+  );
+
+  // Optimistic mutation for approval
+  const approveMutation = useMutation({
+    mutationFn: async (withdrawalId: string) => {
+      const { data, error } = await supabase
         .from('withdrawals')
         .update({
           status: 'completed',
           processed_at: new Date().toISOString(),
         })
-        .eq('id', selectedWithdrawal.id);
+        .eq('id', withdrawalId)
+        .select()
+        .single();
 
       if (error) throw error;
+      return data;
+    },
+    onMutate: async (withdrawalId) => {
+      await queryClient.cancelQueries({ queryKey: paymentKeys.withdrawals() });
+      const previousData = queryClient.getQueryData<WithdrawalWithUser[]>(paymentKeys.withdrawals());
 
-      setShowApproveDialog(false);
-      setSelectedWithdrawal(null);
-      fetchWithdrawals();
-    } catch (error) {
-      console.error('Error approving withdrawal:', error);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+      // Optimistically update status
+      queryClient.setQueryData<WithdrawalWithUser[]>(
+        paymentKeys.withdrawals(),
+        (old) => old?.map(w => 
+          w.id === withdrawalId 
+            ? { ...w, status: 'completed', processed_at: new Date().toISOString() }
+            : w
+        ) || []
+      );
 
-  const rejectWithdrawal = async () => {
-    if (!selectedWithdrawal) return;
+      return { previousData };
+    },
+    onError: (err, withdrawalId, context) => {
+      queryClient.setQueryData(paymentKeys.withdrawals(), context?.previousData);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: paymentKeys.withdrawals() });
+    },
+  });
 
-    setIsProcessing(true);
-    try {
-      const { error } = await supabase
+  // Optimistic mutation for rejection
+  const rejectMutation = useMutation({
+    mutationFn: async (withdrawalId: string) => {
+      const { data, error } = await supabase
         .from('withdrawals')
         .update({
           status: 'rejected',
           processed_at: new Date().toISOString(),
         })
-        .eq('id', selectedWithdrawal.id);
+        .eq('id', withdrawalId)
+        .select()
+        .single();
 
       if (error) throw error;
+      return data;
+    },
+    onMutate: async (withdrawalId) => {
+      await queryClient.cancelQueries({ queryKey: paymentKeys.withdrawals() });
+      const previousData = queryClient.getQueryData<WithdrawalWithUser[]>(paymentKeys.withdrawals());
 
-      setShowApproveDialog(false);
-      setSelectedWithdrawal(null);
-      fetchWithdrawals();
-    } catch (error) {
-      console.error('Error rejecting withdrawal:', error);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+      queryClient.setQueryData<WithdrawalWithUser[]>(
+        paymentKeys.withdrawals(),
+        (old) => old?.map(w => 
+          w.id === withdrawalId 
+            ? { ...w, status: 'rejected', processed_at: new Date().toISOString() }
+            : w
+        ) || []
+      );
 
-  const openApproveDialog = (withdrawal: WithdrawalWithUser) => {
+      return { previousData };
+    },
+    onError: (err, withdrawalId, context) => {
+      queryClient.setQueryData(paymentKeys.withdrawals(), context?.previousData);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: paymentKeys.withdrawals() });
+    },
+  });
+
+  // Combined loading state
+  const isProcessing = approveMutation.isPending || rejectMutation.isPending;
+
+  const openDialog = useCallback((withdrawal: WithdrawalWithUser) => {
     setSelectedWithdrawal(withdrawal);
-    setShowApproveDialog(true);
-  };
+    setShowDialog(true);
+  }, []);
+
+  const closeDialog = useCallback(() => {
+    setShowDialog(false);
+    setSelectedWithdrawal(null);
+  }, []);
+
+  const handleApprove = useCallback(() => {
+    if (!selectedWithdrawal) return;
+    approveMutation.mutate(selectedWithdrawal.id, {
+      onSuccess: closeDialog,
+    });
+  }, [selectedWithdrawal, approveMutation, closeDialog]);
+
+  const handleReject = useCallback(() => {
+    if (!selectedWithdrawal) return;
+    rejectMutation.mutate(selectedWithdrawal.id, {
+      onSuccess: closeDialog,
+    });
+  }, [selectedWithdrawal, rejectMutation, closeDialog]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -146,39 +228,79 @@ export function PaymentManager() {
     }
   };
 
+  // Loading skeletons
+  const StatSkeleton = () => (
+    <GlassCard padding="md">
+      <Skeleton className="h-4 w-20 bg-ninja-green/10 mb-2" />
+      <Skeleton className="h-8 w-16 bg-ninja-green/10" />
+    </GlassCard>
+  );
+
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-red-500">Failed to load withdrawals</p>
+        <Button 
+          onClick={() => queryClient.invalidateQueries({ queryKey: paymentKeys.all })}
+          className="mt-4"
+        >
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-heading font-light text-ninja-mint">Payment Manager</h1>
-        <p className="text-ninja-sage">Manage withdrawals and payments</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-heading font-light text-ninja-mint">Payment Manager</h1>
+          <p className="text-ninja-sage">Manage withdrawals and payments</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => queryClient.invalidateQueries({ queryKey: paymentKeys.all })}
+          disabled={isFetching}
+        >
+          <RefreshCw className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
+          {isFetching ? 'Refreshing...' : 'Refresh'}
+        </Button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <GlassCard padding="md">
-          <p className="stat-label">Total Withdrawals</p>
-          <p className="stat-value">{withdrawals.length}</p>
-        </GlassCard>
-        <GlassCard padding="md" className="border-yellow-500/30">
-          <p className="stat-label text-yellow-400">Pending</p>
-          <p className="stat-value text-yellow-400">{pendingWithdrawals.length}</p>
-        </GlassCard>
-        <GlassCard padding="md">
-          <p className="stat-label">Completed</p>
-          <p className="stat-value">
-            {withdrawals.filter((w) => w.status === 'completed').length}
-          </p>
-        </GlassCard>
-        <GlassCard padding="md" className="border-ninja-green/40">
-          <p className="stat-label text-ninja-green">Total Amount</p>
-          <p className="stat-value text-ninja-green">
-            KSh {withdrawals
-              .filter((w) => w.status === 'completed')
-              .reduce((sum, w) => sum + w.amount, 0)
-              .toLocaleString()}
-          </p>
-        </GlassCard>
+        {isLoading ? (
+          <>
+            <StatSkeleton />
+            <StatSkeleton />
+            <StatSkeleton />
+            <StatSkeleton />
+          </>
+        ) : (
+          <>
+            <GlassCard padding="md">
+              <p className="stat-label">Total Withdrawals</p>
+              <p className="stat-value">{stats.total}</p>
+            </GlassCard>
+            <GlassCard padding="md" className="border-yellow-500/30">
+              <p className="stat-label text-yellow-400">Pending</p>
+              <p className="stat-value text-yellow-400">{stats.pending}</p>
+            </GlassCard>
+            <GlassCard padding="md">
+              <p className="stat-label">Completed</p>
+              <p className="stat-value">{stats.completed}</p>
+            </GlassCard>
+            <GlassCard padding="md" className="border-ninja-green/40">
+              <p className="stat-label text-ninja-green">Total Amount</p>
+              <p className="stat-value text-ninja-green">
+                KSh {stats.totalAmount.toLocaleString()}
+              </p>
+            </GlassCard>
+          </>
+        )}
       </div>
 
       {/* Pending Withdrawals */}
@@ -187,16 +309,23 @@ export function PaymentManager() {
           <Clock className="w-5 h-5 text-yellow-400" />
           <h2 className="text-xl font-heading text-ninja-mint">Pending Withdrawals</h2>
           <span className="px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 text-xs font-mono">
-            {pendingWithdrawals.length}
+            {stats.pending}
           </span>
+          {isFetching && <span className="text-xs text-ninja-sage animate-pulse">(updating...)</span>}
         </div>
 
-        {pendingWithdrawals.length > 0 ? (
+        {isLoading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-24 w-full bg-ninja-green/5 rounded-xl" />
+            ))}
+          </div>
+        ) : pendingWithdrawals.length > 0 ? (
           <div className="space-y-3">
             {pendingWithdrawals.map((withdrawal) => (
               <div
                 key={withdrawal.id}
-                className="p-4 rounded-xl bg-ninja-black/50 border border-yellow-500/20"
+                className="p-4 rounded-xl bg-ninja-black/50 border border-yellow-500/20 hover:border-yellow-500/40 transition-colors"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
@@ -226,9 +355,10 @@ export function PaymentManager() {
                       KSh {withdrawal.amount.toLocaleString()}
                     </p>
                     <Button
-                      onClick={() => openApproveDialog(withdrawal)}
+                      onClick={() => openDialog(withdrawal)}
                       size="sm"
                       className="mt-2 btn-primary"
+                      disabled={isProcessing}
                     >
                       Review
                     </Button>
@@ -250,8 +380,10 @@ export function PaymentManager() {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-ninja-green" />
+          <div className="space-y-3">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className="h-16 w-full bg-ninja-green/5 rounded-xl" />
+            ))}
           </div>
         ) : withdrawals.length > 0 ? (
           <div className="overflow-x-auto">
@@ -267,7 +399,10 @@ export function PaymentManager() {
               </thead>
               <tbody>
                 {withdrawals.map((withdrawal) => (
-                  <tr key={withdrawal.id} className="border-b border-ninja-green/10 hover:bg-ninja-green/5">
+                  <tr 
+                    key={withdrawal.id} 
+                    className="border-b border-ninja-green/10 hover:bg-ninja-green/5 transition-colors"
+                  >
                     <td className="py-4 px-4">
                       <p className="text-ninja-mint font-medium">{withdrawal.user.legal_name}</p>
                       <p className="text-ninja-sage text-sm">@{withdrawal.user.username}</p>
@@ -304,8 +439,8 @@ export function PaymentManager() {
         )}
       </GlassCard>
 
-      {/* Approve Dialog */}
-      <Dialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
+      {/* Review Dialog */}
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="bg-ninja-dark/95 backdrop-blur-xl border-ninja-green/20 max-w-md">
           <DialogHeader>
             <DialogTitle className="text-2xl font-heading text-ninja-mint">
@@ -349,7 +484,7 @@ export function PaymentManager() {
 
               <div className="flex gap-3">
                 <Button
-                  onClick={rejectWithdrawal}
+                  onClick={handleReject}
                   disabled={isProcessing}
                   variant="outline"
                   className="flex-1 bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20"
@@ -358,12 +493,12 @@ export function PaymentManager() {
                   Reject
                 </Button>
                 <Button
-                  onClick={approveWithdrawal}
+                  onClick={handleApprove}
                   disabled={isProcessing}
                   className="flex-1 btn-primary"
                 >
                   <CheckCircle className="w-4 h-4 mr-2" />
-                  Approve
+                  {approveMutation.isPending ? 'Processing...' : 'Approve'}
                 </Button>
               </div>
             </div>

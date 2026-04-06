@@ -13,6 +13,7 @@ import {
   Shield,
   Smartphone
 } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { CursorGlow } from '@/components/layout/CursorGlow';
 import { DemoModeBanner } from '@/components/common/DemoModeBanner';
@@ -40,9 +41,152 @@ const signupSchema = z.object({
 
 type SignupFormData = z.infer<typeof signupSchema>;
 
+// Types for payment status
+type PaymentStatus = 'pending' | 'verifying' | 'success' | 'failed';
+
+// Payment monitoring hook
+const usePaymentMonitoring = (
+  userId: string | null,
+  onSuccess: () => void,
+  onFailure: (message: string) => void
+) => {
+  const [status, setStatus] = useState<PaymentStatus>('pending');
+  const [message, setMessage] = useState('Click the button below to pay KSh 200 via M-Pesa');
+  const [remainingAttempts, setRemainingAttempts] = useState(6);
+  
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const channelRef = useRef<any>(null);
+
+  // Cleanup function
+  const cleanup = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+  }, []);
+
+  // Start monitoring
+  const startMonitoring = useCallback((phoneNumber: string) => {
+    if (!userId) return;
+    
+    setStatus('verifying');
+    setMessage('Please check your phone and enter M-Pesa PIN to complete payment...');
+    setRemainingAttempts(6);
+
+    // Setup realtime subscription
+    channelRef.current = supabase
+      .channel(`payment-${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'payments',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          if (payload.new.status === 'completed') {
+            cleanup();
+            setStatus('success');
+            setMessage('Payment verified! Redirecting to dashboard...');
+            onSuccess();
+          } else if (payload.new.status === 'failed') {
+            cleanup();
+            setStatus('failed');
+            onFailure('Payment failed. Please try again.');
+          }
+        }
+      )
+      .subscribe();
+
+    // Fallback polling
+    let attempts = 0;
+    const maxAttempts = 6;
+
+    const checkPayment = async () => {
+      attempts++;
+      setRemainingAttempts(maxAttempts - attempts);
+
+      try {
+        const { data: payment } = await supabase
+          .from('payments')
+          .select('status')
+          .eq('user_id', userId)
+          .eq('payment_type', 'registration')
+          .maybeSingle();
+
+        if (payment?.status === 'completed') {
+          cleanup();
+          setStatus('success');
+          onSuccess();
+          return true;
+        }
+
+        if (payment?.status === 'failed' || attempts >= maxAttempts) {
+          cleanup();
+          
+          if (attempts >= maxAttempts) {
+            // Timeout - cleanup
+            await supabase
+              .from('payments')
+              .update({ status: 'failed', updated_at: new Date().toISOString() })
+              .eq('user_id', userId)
+              .eq('payment_type', 'registration');
+            
+            await supabase
+              .from('profiles')
+              .update({ payment_status: 'failed' })
+              .eq('id', userId);
+
+            // Cleanup user
+            try {
+              await supabase.auth.admin.deleteUser(userId);
+              await supabase.from('profiles').delete().eq('id', userId);
+            } catch (e) {
+              console.error('Cleanup error:', e);
+            }
+            
+            setStatus('failed');
+            onFailure('Payment not received within time limit. Account removed.');
+          }
+          return true;
+        }
+
+        return false;
+      } catch (error) {
+        console.error('Payment check error:', error);
+        return false;
+      }
+    };
+
+    // Initial check
+    checkPayment().then(shouldStop => {
+      if (!shouldStop) {
+        intervalRef.current = setInterval(() => {
+          checkPayment().then(stop => {
+            if (stop && intervalRef.current) {
+              clearInterval(intervalRef.current);
+              intervalRef.current = null;
+            }
+          });
+        }, 5000);
+      }
+    });
+  }, [userId, cleanup, onSuccess, onFailure]);
+
+  useEffect(() => cleanup, [cleanup]);
+
+  return { status, message, remainingAttempts, startMonitoring, cleanup };
+};
+
 export function SignupPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const prefillReferralCode = searchParams.get('ref');
   
   const [showPassword, setShowPassword] = useState(false);
@@ -50,16 +194,10 @@ export function SignupPage() {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
-  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'verifying' | 'success' | 'failed'>('pending');
-  const [paymentMessage, setPaymentMessage] = useState('');
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
-  const [remainingAttempts, setRemainingAttempts] = useState(6);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const paymentCheckInterval = useRef<NodeJS.Timeout | null>(null);
-  const realtimeChannel = useRef<any>(null);
 
   const {
     register,
@@ -76,296 +214,38 @@ export function SignupPage() {
   });
 
   const agreedToPolicy = watch('agreedToPolicy');
+  const phoneNumber = watch('phoneNumber');
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (paymentCheckInterval.current) {
-        clearInterval(paymentCheckInterval.current);
-      }
-      if (realtimeChannel.current) {
-        supabase.removeChannel(realtimeChannel.current);
-      }
-    };
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    
-    const files = e.dataTransfer.files;
-    if (files.length > 0 && files[0].type.startsWith('image/')) {
-      const file = files[0];
-      setAvatarFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAvatarPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  }, []);
-
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      setAvatarFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAvatarPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  }, []);
-
-  const generateReferralCode = () => {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
-  };
-
-  // Setup realtime subscription for instant payment updates
-  const setupRealtimeSubscription = (userId: string) => {
-    realtimeChannel.current = supabase
-      .channel(`payment-${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'payments',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          console.log('Realtime payment update:', payload);
-          if (payload.new.status === 'completed') {
-            handlePaymentSuccess(userId);
-          } else if (payload.new.status === 'failed') {
-            handlePaymentFailure();
-          }
-        }
-      )
-      .subscribe();
-  };
-
-  const handlePaymentSuccess = async (userId: string) => {
-    // Clear interval and realtime
-    if (paymentCheckInterval.current) {
-      clearInterval(paymentCheckInterval.current);
-      paymentCheckInterval.current = null;
-    }
-    if (realtimeChannel.current) {
-      supabase.removeChannel(realtimeChannel.current);
-    }
-
-    // Update profile status
-    await supabase
-      .from('profiles')
-      .update({ 
-        payment_status: 'completed',
-        payment_verified_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
-
-    setPaymentStatus('success');
-    setPaymentMessage('Payment verified! Redirecting to dashboard...');
-
-    // Navigate to dashboard
-    setTimeout(() => {
-      navigate('/dashboard', { replace: true });
-    }, 2000);
-  };
-
-  const handlePaymentFailure = async () => {
-    if (paymentCheckInterval.current) {
-      clearInterval(paymentCheckInterval.current);
-      paymentCheckInterval.current = null;
-    }
-
-    setPaymentStatus('failed');
-    setPaymentMessage('Payment failed. Please try again.');
-
-    setTimeout(() => {
-      setShowPaymentDialog(false);
-      setIsSubmitting(false);
-    }, 3000);
-  };
-
-  const checkPaymentStatus = async (userId: string) => {
-    let attempts = 0;
-    const maxAttempts = 6;
-
-    // Clear any existing interval
-    if (paymentCheckInterval.current) {
-      clearInterval(paymentCheckInterval.current);
-      paymentCheckInterval.current = null;
-    }
-
-    const checkOnce = async (): Promise<boolean> => {
-      attempts++;
-      setRemainingAttempts(maxAttempts - attempts);
-      console.log(`Payment check attempt ${attempts}/${maxAttempts}`);
-
-      try {
-        const { data: payment, error } = await supabase
-          .from('payments')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('payment_type', 'registration')
-          .maybeSingle();
-
-        if (error) {
-          console.error('Payment check query error:', error);
-          return false;
-        }
-
-        // SUCCESS
-        if (payment?.status === 'completed') {
-          await handlePaymentSuccess(userId);
-          return true;
-        }
-
-        // FAILED
-        if (payment?.status === 'failed') {
-          await handlePaymentFailure();
-          return true;
-        }
-
-        // TIMEOUT
-        if (attempts >= maxAttempts) {
-          console.log('Payment verification timeout');
-
-          if (paymentCheckInterval.current) {
-            clearInterval(paymentCheckInterval.current);
-            paymentCheckInterval.current = null;
-          }
-
-          // Update payment and profile to failed
-          await supabase
-            .from('payments')
-            .update({ status: 'failed', updated_at: new Date().toISOString() })
-            .eq('user_id', userId)
-            .eq('payment_type', 'registration');
-
-          await supabase
-            .from('profiles')
-            .update({ payment_status: 'failed' })
-            .eq('id', userId);
-
-          // Delete user after timeout
-          try {
-            await supabase.auth.admin.deleteUser(userId);
-            await supabase.from('profiles').delete().eq('id', userId);
-          } catch (cleanupError) {
-            console.error('Cleanup error:', cleanupError);
-          }
-
-          setPaymentStatus('failed');
-          setPaymentMessage('Payment not received within time limit. Account removed.');
-
-          setTimeout(() => {
-            setShowPaymentDialog(false);
-            setIsSubmitting(false);
-          }, 3000);
-
-          return true;
-        }
-
-        return false;
-      } catch (error) {
-        console.error('Payment check error:', error);
-        return false;
-      }
-    };
-
-    // Run first check immediately
-    const shouldStop = await checkOnce();
-    if (shouldStop) return;
-
-    // Set up interval for subsequent checks
-    paymentCheckInterval.current = setInterval(async () => {
-      const stop = await checkOnce();
-      if (stop && paymentCheckInterval.current) {
-        clearInterval(paymentCheckInterval.current);
-        paymentCheckInterval.current = null;
-      }
-    }, 5000);
-  };
-
-  const initiatePayment = async (userId: string, phoneNumber: string) => {
-    try {
-      const formattedPhone = phoneNumber.startsWith('254')
-        ? phoneNumber
-        : `254${phoneNumber.replace(/^0+/, '')}`;
-
-      // Call database function to create payment
-      const { data: result, error: rpcError } = await supabase.rpc(
-        'initiate_registration_payment',
-        {
-          p_user_id: userId,
-          p_phone_number: formattedPhone,
-        }
-      );
-
-      if (rpcError) throw rpcError;
-      if (!result?.success) throw new Error(result?.error || 'Failed to create payment record');
-
-      // Setup realtime subscription for instant updates
-      setupRealtimeSubscription(userId);
-
-      // Call M-Pesa STK Push
-      const response = await fetch(
-        'https://jdnowuqzsufkhgrnunpb.supabase.co/functions/v1/mpesa-stk-push',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            phoneNumber: formattedPhone,
-            amount: 200,
-            accountReference: `REG-${userId}`,
-            transactionDesc: 'Referral Ninja Registration',
-          }),
-        }
-      );
-
-      const mpesaResult = await response.json();
-      if (!mpesaResult.success) {
-        throw new Error(mpesaResult.error || 'STK push failed');
-      }
-
-      setPaymentStatus('verifying');
-      setPaymentMessage('Please check your phone and enter M-Pesa PIN to complete payment...');
-      setRemainingAttempts(6);
-      
-      // Start checking payment status
-      checkPaymentStatus(userId);
-      
-    } catch (error: any) {
-      console.error('Payment initiation error:', error);
-      setPaymentStatus('failed');
-      setPaymentMessage(error.message || 'Failed to initiate payment. Please try again.');
-      
+  // Payment monitoring
+  const {
+    status: paymentStatus,
+    message: paymentMessage,
+    remainingAttempts,
+    startMonitoring,
+    cleanup: cleanupPayment,
+  } = usePaymentMonitoring(
+    createdUserId,
+    () => {
+      // On success - invalidate queries and redirect
+      queryClient.invalidateQueries({ queryKey: ['user'] });
+      setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
+    },
+    (msg) => {
+      // On failure
       setTimeout(() => {
         setShowPaymentDialog(false);
-        setIsSubmitting(false);
+        signupMutation.reset();
       }, 3000);
     }
-  };
+  );
 
-  const onSubmit = async (data: SignupFormData) => {
-    setIsSubmitting(true);
-    
-    try {
-      const referralCode = generateReferralCode();
+  // Cleanup on unmount
+  useEffect(() => cleanupPayment, [cleanupPayment]);
+
+  // Signup mutation
+  const signupMutation = useMutation({
+    mutationFn: async (data: SignupFormData) => {
+      const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       
       // 1. Create auth user
       const { data: authData, error: authError } = await signUp(
@@ -385,9 +265,8 @@ export function SignupPage() {
       }
 
       const userId = authData.user.id;
-      setCreatedUserId(userId);
 
-      // 2. Create profile explicitly
+      // 2. Create profile
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
@@ -406,13 +285,13 @@ export function SignupPage() {
         throw profileError;
       }
 
-      // 3. Upload avatar if provided
+      // 3. Upload avatar
       if (avatarFile) {
         const avatarUrl = await uploadAvatar(userId, avatarFile);
         await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('id', userId);
       }
 
-      // 4. Create referral record if referred
+      // 4. Create referral record
       if (data.referralCode) {
         const { data: referrer } = await supabase
           .from('profiles')
@@ -430,24 +309,111 @@ export function SignupPage() {
         }
       }
 
-      // 5. Show payment dialog
+      return { userId, phoneNumber: data.phoneNumber };
+    },
+    onSuccess: ({ userId }) => {
+      setCreatedUserId(userId);
       setShowPaymentDialog(true);
-      setPaymentStatus('pending');
-      setPaymentMessage('Click the button below to pay KSh 200 via M-Pesa');
-      
-    } catch (error: any) {
-      console.error('Signup error:', error);
+    },
+    onError: (error: any) => {
       alert(error.message || 'Failed to create account. Please try again.');
-      setIsSubmitting(false);
+    },
+  });
+
+  // Payment initiation mutation
+  const paymentMutation = useMutation({
+    mutationFn: async ({ userId, phone }: { userId: string; phone: string }) => {
+      const formattedPhone = phone.startsWith('254') ? phone : `254${phone.replace(/^0+/, '')}`;
+
+      // Create payment record
+      const { data: result, error: rpcError } = await supabase.rpc(
+        'initiate_registration_payment',
+        { p_user_id: userId, p_phone_number: formattedPhone }
+      );
+
+      if (rpcError) throw rpcError;
+      if (!result?.success) throw new Error(result?.error || 'Failed to create payment record');
+
+      // Call M-Pesa STK Push
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mpesa-stk-push`,
+        {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({
+            phoneNumber: formattedPhone,
+            amount: 200,
+            accountReference: `REG-${userId}`,
+            transactionDesc: 'Referral Ninja Registration',
+          }),
+        }
+      );
+
+      const mpesaResult = await response.json();
+      if (!mpesaResult.success) {
+        throw new Error(mpesaResult.error || 'STK push failed');
+      }
+
+      return { userId, phone: formattedPhone };
+    },
+    onSuccess: ({ userId, phone }) => {
+      startMonitoring(phone);
+    },
+    onError: (error: any) => {
+      alert(error.message || 'Failed to initiate payment. Please try again.');
+    },
+  });
+
+  // File handling
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0 && files[0].type.startsWith('image/')) {
+      const file = files[0];
+      setAvatarFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setAvatarPreview(reader.result as string);
+      reader.readAsDataURL(file);
     }
+  }, []);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      setAvatarFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setAvatarPreview(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  }, []);
+
+  const onSubmit = (data: SignupFormData) => {
+    signupMutation.mutate(data);
   };
 
   const handlePayNow = () => {
-    if (createdUserId) {
-      const phoneNumber = watch('phoneNumber');
-      initiatePayment(createdUserId, phoneNumber);
+    if (createdUserId && phoneNumber) {
+      paymentMutation.mutate({ userId: createdUserId, phone: phoneNumber });
     }
   };
+
+  const isSubmitting = signupMutation.isPending || paymentMutation.isPending;
 
   return (
     <div className="min-h-screen bg-ninja-black relative overflow-hidden">
@@ -704,7 +670,7 @@ export function SignupPage() {
               disabled={isSubmitting}
               className="w-full btn-primary h-12 text-lg"
             >
-              {isSubmitting ? (
+              {signupMutation.isPending ? (
                 <>
                   <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                   Creating Account...
@@ -747,9 +713,22 @@ export function SignupPage() {
                   <Shield className="w-10 h-10 text-ninja-green" />
                 </div>
                 <p className="text-ninja-sage text-center">{paymentMessage}</p>
-                <Button onClick={handlePayNow} className="btn-primary w-full">
-                  <Smartphone className="w-5 h-5 mr-2" />
-                  Pay with M-Pesa
+                <Button 
+                  onClick={handlePayNow} 
+                  className="btn-primary w-full"
+                  disabled={paymentMutation.isPending}
+                >
+                  {paymentMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      Initiating...
+                    </>
+                  ) : (
+                    <>
+                      <Smartphone className="w-5 h-5 mr-2" />
+                      Pay with M-Pesa
+                    </>
+                  )}
                 </Button>
               </>
             )}
