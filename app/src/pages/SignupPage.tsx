@@ -142,16 +142,11 @@ const usePaymentMonitoring = (
               .update({ payment_status: 'failed' })
               .eq('id', userId);
 
-            // Cleanup user
-            try {
-              await supabase.auth.admin.deleteUser(userId);
-              await supabase.from('profiles').delete().eq('id', userId);
-            } catch (e) {
-              console.error('Cleanup error:', e);
-            }
+            // Note: Cannot delete auth user from client side
+            // This requires admin rights - handle via edge function or leave for cleanup job
             
             setStatus('failed');
-            onFailure('Payment not received within time limit. Account removed.');
+            onFailure('Payment not received within time limit. Please contact support.');
           }
           return true;
         }
@@ -242,12 +237,12 @@ export function SignupPage() {
   // Cleanup on unmount
   useEffect(() => cleanupPayment, [cleanupPayment]);
 
-  // Signup mutation
+  // Signup mutation - UPDATED to use update() instead of insert()
   const signupMutation = useMutation({
     mutationFn: async (data: SignupFormData) => {
       const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       
-      // 1. Create auth user
+      // 1. Create auth user (trigger automatically creates profile)
       const { data: authData, error: authError } = await signUp(
         data.email,
         data.password,
@@ -266,11 +261,10 @@ export function SignupPage() {
 
       const userId = authData.user.id;
 
-      // 2. Create profile
+      // 2. UPDATE the profile created by trigger (NOT insert)
       const { error: profileError } = await supabase
         .from('profiles')
-        .insert({
-          id: userId,
+        .update({
           legal_name: data.legalName,
           username: data.username,
           email: data.email,
@@ -278,34 +272,50 @@ export function SignupPage() {
           referral_code: referralCode,
           referred_by: data.referralCode || null,
           payment_status: 'pending',
-        });
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
 
       if (profileError) {
-        await supabase.auth.admin.deleteUser(userId);
         throw profileError;
       }
 
-      // 3. Upload avatar
+      // 3. Upload avatar if provided
       if (avatarFile) {
-        const avatarUrl = await uploadAvatar(userId, avatarFile);
-        await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('id', userId);
+        try {
+          const avatarUrl = await uploadAvatar(userId, avatarFile);
+          if (avatarUrl) {
+            await supabase
+              .from('profiles')
+              .update({ avatar_url: avatarUrl })
+              .eq('id', userId);
+          }
+        } catch (avatarError) {
+          console.error('Avatar upload error:', avatarError);
+          // Continue without avatar - don't fail signup
+        }
       }
 
-      // 4. Create referral record
+      // 4. Create referral record if referral code provided
       if (data.referralCode) {
-        const { data: referrer } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('referral_code', data.referralCode)
-          .single();
-        
-        if (referrer) {
-          await supabase.from('referrals').insert({
-            referrer_id: referrer.id,
-            referred_id: userId,
-            status: 'pending',
-            earned_amount: 0,
-          });
+        try {
+          const { data: referrer } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('referral_code', data.referralCode)
+            .single();
+          
+          if (referrer) {
+            await supabase.from('referrals').insert({
+              referrer_id: referrer.id,
+              referred_id: userId,
+              status: 'pending',
+              earned_amount: 0,
+            });
+          }
+        } catch (referralError) {
+          console.error('Referral creation error:', referralError);
+          // Continue without referral - don't fail signup
         }
       }
 
