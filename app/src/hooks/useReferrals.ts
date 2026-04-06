@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import type { Referral, ReferralStats } from '@/types';
+import type { ReferralStats } from '@/types';
 
 export const referralKeys = {
   all: ['referrals'] as const,
@@ -13,19 +13,20 @@ export function useReferralStats(userId: string) {
   return useQuery({
     queryKey: referralKeys.stats(userId),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('referrals')
+      const { data, error } = await (supabase.from('referrals') as any)
         .select('status, count')
         .eq('referrer_id', userId)
         .group('status');
       
       if (error) throw error;
       
+      const rows = (data || []) as Array<{ status: string; count: number }>;
+      
       // Calculate totals
       const stats: ReferralStats = {
-        total: data.reduce((acc, curr) => acc + curr.count, 0),
-        successful: data.find(d => d.status === 'successful')?.count || 0,
-        pending: data.find(d => d.status === 'pending')?.count || 0,
+        total: rows.reduce((acc: number, curr) => acc + curr.count, 0),
+        successful: rows.find((d) => d.status === 'successful')?.count || 0,
+        pending: rows.find((d) => d.status === 'pending')?.count || 0,
         earnings: 0, // Calculate from successful * 100
       };
       

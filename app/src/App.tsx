@@ -1,6 +1,5 @@
 import { BrowserRouter as Router, Routes, Route,  } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
-import { AuthProvider } from '@/hooks/useAuth';
 import { CursorGlow } from '@/components/layout/CursorGlow';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
@@ -59,7 +58,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <AuthProvider>
+    <>
       <Router>
         <Routes>
           {/* Public Landing Page */}
@@ -252,7 +251,7 @@ function App() {
           },
         }}
       />
-    </AuthProvider>
+    </>
   );
 }
 

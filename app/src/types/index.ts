@@ -16,6 +16,23 @@ export interface Profile {
   updated_at: string;
 }
 
+export interface User {
+  id: string;
+  email: string;
+  phone_number?: string;
+  role?: string;
+  app_metadata?: Record<string, any>;
+  user_metadata?: Record<string, any>;
+  profile?: Profile | null;
+}
+
+export interface ReferralStats {
+  total: number;
+  successful: number;
+  pending: number;
+  earnings: number;
+}
+
 export interface Task {
   id: string;
   title: string;

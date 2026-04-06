@@ -57,7 +57,7 @@ export function useUpdateProfile() {
       
       return { previousUser };
     },
-    onError: (err, newData, context) => {
+    onError: (_err, _newData, context) => {
       queryClient.setQueryData(userKeys.current(), context?.previousUser);
     },
   });

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -96,7 +96,7 @@ export function PaymentsPage() {
   const [showWithdrawDialog, setShowWithdrawDialog] = useState(false);
   const [showVerificationDialog, setShowVerificationDialog] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
-  const [pendingWithdrawal, setPendingWithdrawal] = useState<WithdrawalFormData | null>(null);
+  const [pendingWithdrawal, setPendingWithdrawal] = useState<WithdrawalFormData & { codeId?: string } | null>(null);
   const [message, setMessage] = useState('');
 
   const {

@@ -27,11 +27,16 @@ interface WithdrawalWithUser {
   phone_number: string;
   requested_at: string;
   processed_at: string | null;
+  processed_by: string | null;
   user: {
     legal_name: string;
     username: string;
     email: string;
   };
+  processor?: {
+    legal_name: string;
+    username: string;
+  } | null;
 }
 
 // Query keys
@@ -41,13 +46,14 @@ const paymentKeys = {
   stats: () => [...paymentKeys.all, 'stats'] as const,
 };
 
-// Single efficient query with join
+// FIXED: Explicit foreign key specification
 const fetchWithdrawals = async (): Promise<WithdrawalWithUser[]> => {
   const { data, error } = await supabase
     .from('withdrawals')
     .select(`
       *,
-      user:profiles(legal_name, username, email)
+      user:profiles!withdrawals_user_id_fkey(legal_name, username, email),
+      processor:profiles!withdrawals_processed_by_fkey(legal_name, username)
     `)
     .order('requested_at', { ascending: false });
 
@@ -97,11 +103,14 @@ export function PaymentManager() {
   // Optimistic mutation for approval
   const approveMutation = useMutation({
     mutationFn: async (withdrawalId: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
       const { data, error } = await supabase
         .from('withdrawals')
         .update({
           status: 'completed',
           processed_at: new Date().toISOString(),
+          processed_by: user?.id,
         })
         .eq('id', withdrawalId)
         .select()
@@ -113,20 +122,26 @@ export function PaymentManager() {
     onMutate: async (withdrawalId) => {
       await queryClient.cancelQueries({ queryKey: paymentKeys.withdrawals() });
       const previousData = queryClient.getQueryData<WithdrawalWithUser[]>(paymentKeys.withdrawals());
+      const { data: { user } } = await supabase.auth.getUser();
 
       // Optimistically update status
       queryClient.setQueryData<WithdrawalWithUser[]>(
         paymentKeys.withdrawals(),
         (old) => old?.map(w => 
           w.id === withdrawalId 
-            ? { ...w, status: 'completed', processed_at: new Date().toISOString() }
+            ? { 
+                ...w, 
+                status: 'completed', 
+                processed_at: new Date().toISOString(),
+                processed_by: user?.id || null,
+              }
             : w
         ) || []
       );
 
       return { previousData };
     },
-    onError: (err, withdrawalId, context) => {
+    onError: (_err, _withdrawalId, context) => {
       queryClient.setQueryData(paymentKeys.withdrawals(), context?.previousData);
     },
     onSettled: () => {
@@ -137,11 +152,14 @@ export function PaymentManager() {
   // Optimistic mutation for rejection
   const rejectMutation = useMutation({
     mutationFn: async (withdrawalId: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
       const { data, error } = await supabase
         .from('withdrawals')
         .update({
           status: 'rejected',
           processed_at: new Date().toISOString(),
+          processed_by: user?.id,
         })
         .eq('id', withdrawalId)
         .select()
@@ -153,19 +171,25 @@ export function PaymentManager() {
     onMutate: async (withdrawalId) => {
       await queryClient.cancelQueries({ queryKey: paymentKeys.withdrawals() });
       const previousData = queryClient.getQueryData<WithdrawalWithUser[]>(paymentKeys.withdrawals());
+      const { data: { user } } = await supabase.auth.getUser();
 
       queryClient.setQueryData<WithdrawalWithUser[]>(
         paymentKeys.withdrawals(),
         (old) => old?.map(w => 
           w.id === withdrawalId 
-            ? { ...w, status: 'rejected', processed_at: new Date().toISOString() }
+            ? { 
+                ...w, 
+                status: 'rejected', 
+                processed_at: new Date().toISOString(),
+                processed_by: user?.id || null,
+              }
             : w
         ) || []
       );
 
       return { previousData };
     },
-    onError: (err, withdrawalId, context) => {
+    onError: (_err, _withdrawalId, context) => {
       queryClient.setQueryData(paymentKeys.withdrawals(), context?.previousData);
     },
     onSettled: () => {
@@ -335,9 +359,9 @@ export function PaymentManager() {
                     <div>
                       <p className="text-ninja-mint font-medium flex items-center gap-2">
                         <User className="w-4 h-4" />
-                        {withdrawal.user.legal_name}
+                        {withdrawal.user?.legal_name || 'Unknown User'}
                       </p>
-                      <p className="text-ninja-sage text-sm">@{withdrawal.user.username}</p>
+                      <p className="text-ninja-sage text-sm">@{withdrawal.user?.username || 'unknown'}</p>
                       <div className="flex items-center gap-3 mt-1 text-xs text-ninja-sage">
                         <span className="flex items-center gap-1">
                           <Smartphone className="w-3 h-3" />
@@ -404,8 +428,8 @@ export function PaymentManager() {
                     className="border-b border-ninja-green/10 hover:bg-ninja-green/5 transition-colors"
                   >
                     <td className="py-4 px-4">
-                      <p className="text-ninja-mint font-medium">{withdrawal.user.legal_name}</p>
-                      <p className="text-ninja-sage text-sm">@{withdrawal.user.username}</p>
+                      <p className="text-ninja-mint font-medium">{withdrawal.user?.legal_name || 'Unknown'}</p>
+                      <p className="text-ninja-sage text-sm">@{withdrawal.user?.username || 'unknown'}</p>
                     </td>
                     <td className="py-4 px-4">
                       <p className="text-ninja-sage text-sm">{withdrawal.phone_number}</p>
@@ -459,8 +483,8 @@ export function PaymentManager() {
                     <User className="w-5 h-5 text-ninja-green" />
                   </div>
                   <div>
-                    <p className="text-ninja-mint font-medium">{selectedWithdrawal.user.legal_name}</p>
-                    <p className="text-ninja-sage text-sm">@{selectedWithdrawal.user.username}</p>
+                    <p className="text-ninja-mint font-medium">{selectedWithdrawal.user?.legal_name || 'Unknown'}</p>
+                    <p className="text-ninja-sage text-sm">@{selectedWithdrawal.user?.username || 'unknown'}</p>
                   </div>
                 </div>
                 <div className="space-y-2 text-sm">

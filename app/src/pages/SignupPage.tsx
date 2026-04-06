@@ -70,7 +70,7 @@ const usePaymentMonitoring = (
   }, []);
 
   // Start monitoring
-  const startMonitoring = useCallback((phoneNumber: string) => {
+  const startMonitoring = useCallback((_phoneNumber: string) => {
     if (!userId) return;
     
     setStatus('verifying');
@@ -230,7 +230,7 @@ export function SignupPage() {
       queryClient.invalidateQueries({ queryKey: ['user'] });
       setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
     },
-    (msg) => {
+    (_msg) => {
       // On failure
       setTimeout(() => {
         setShowPaymentDialog(false);
@@ -359,7 +359,7 @@ export function SignupPage() {
 
       return { userId, phone: formattedPhone };
     },
-    onSuccess: ({ userId, phone }) => {
+    onSuccess: ({ phone }) => {
       startMonitoring(phone);
     },
     onError: (error: any) => {

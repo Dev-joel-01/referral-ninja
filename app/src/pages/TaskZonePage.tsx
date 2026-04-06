@@ -141,7 +141,7 @@ export function TaskZonePage() {
       
       return { previousTasks };
     },
-    onError: (err, task, context) => {
+    onError: (_err, _task, context) => {
       // Rollback on error
       queryClient.setQueryData(taskKeys.list(activeTab), context?.previousTasks);
     },

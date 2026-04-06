@@ -102,44 +102,6 @@ const fetchTopReferrers = async (): Promise<TopReferrer[]> => {
   }));
 };
 
-// Alternative without view - batch fetch (still efficient)
-const fetchTopReferrersBatch = async (): Promise<TopReferrer[]> => {
-  // Get paid users first
-  const { data: profiles, error: profileError } = await supabase
-    .from('profiles')
-    .select('id, username, avatar_url')
-    .eq('payment_status', 'completed')
-    .limit(20); // Get more than 5 to account for zero-referral users
-
-  if (profileError) throw profileError;
-  if (!profiles?.length) return [];
-
-  // Single batch query for all referral counts
-  const userIds = profiles.map(p => p.id);
-  const { data: referrals, error: refError } = await supabase
-    .from('referrals')
-    .select('referrer_id')
-    .in('referrer_id', userIds)
-    .eq('status', 'completed');
-
-  if (refError) throw refError;
-
-  // Aggregate in memory
-  const countMap = new Map<string, number>();
-  referrals?.forEach(r => {
-    countMap.set(r.referrer_id, (countMap.get(r.referrer_id) || 0) + 1);
-  });
-
-  // Map and sort
-  return profiles
-    .map(p => ({
-      ...p,
-      referral_count: countMap.get(p.id) || 0,
-    }))
-    .sort((a, b) => b.referral_count - a.referral_count)
-    .slice(0, 5);
-};
-
 export function DashboardPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();

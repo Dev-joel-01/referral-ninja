@@ -25,11 +25,9 @@ export const queryClient = new QueryClient({
     },
     mutations: {
       // Retry mutations once (they're more critical)
-      retry: 1,
-      // Don't retry on 4xx errors
-      retryOnError: (error: any) => {
+      retry: (failureCount, error: any) => {
         if (error?.status >= 400 && error?.status < 500) return false;
-        return true;
+        return failureCount < 1;
       },
     },
   },

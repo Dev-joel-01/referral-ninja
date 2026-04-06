@@ -120,14 +120,6 @@ const fetchRecentActivity = async (): Promise<ActivityItem[]> => {
     .slice(0, 5);
 };
 
-// Alternative: Use a database function for even faster stats
-// This would be a single RPC call instead of 4 queries
-const fetchAdminStatsRpc = async (): Promise<AdminStats> => {
-  const { data, error } = await supabase.rpc('get_admin_stats');
-  if (error) throw error;
-  return data;
-};
-
 export function AdminDashboard() {
   const queryClient = useQueryClient();
 

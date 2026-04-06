@@ -44,7 +44,7 @@ const fetchUsersWithStats = async (searchQuery: string): Promise<UserWithStats[]
     // Fallback to batched queries
     const { data: profiles, error: profileError } = await supabase
       .from('profiles')
-      .select('id, legal_name, username, email, phone_number, avatar_url, is_admin, payment_status, joined_at, created_at')
+      .select('id, legal_name, username, email, phone_number, avatar_url, referral_code, referred_by, joined_at, password_reset_count, is_admin, payment_status, payment_verified_at, created_at, updated_at')
       .order('created_at', { ascending: false });
     
     if (profileError) throw profileError;
