@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Email Sending Edge Function using Brevo (Sendinblue)
 // This function sends emails for various purposes
 

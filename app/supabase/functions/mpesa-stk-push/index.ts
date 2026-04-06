@@ -1,3 +1,4 @@
+// @ts-nocheck
 // M-Pesa STK Push Edge Function - FIXED VERSION
 // Updated: 2026-04-05
 

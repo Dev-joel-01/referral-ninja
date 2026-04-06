@@ -11,7 +11,8 @@ import {
   Loader2, 
   ArrowRight,
   Shield,
-  Smartphone
+  Smartphone,
+  RefreshCw
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
@@ -41,10 +42,9 @@ const signupSchema = z.object({
 
 type SignupFormData = z.infer<typeof signupSchema>;
 
-// Types for payment status
 type PaymentStatus = 'pending' | 'verifying' | 'success' | 'failed';
 
-// Payment monitoring hook
+// Payment monitoring hook - FIXED VERSION
 const usePaymentMonitoring = (
   userId: string | null,
   onSuccess: () => void,
@@ -52,12 +52,12 @@ const usePaymentMonitoring = (
 ) => {
   const [status, setStatus] = useState<PaymentStatus>('pending');
   const [message, setMessage] = useState('Click the button below to pay KSh 200 via M-Pesa');
-  const [remainingAttempts, setRemainingAttempts] = useState(6);
+  const [remainingAttempts, setRemainingAttempts] = useState(10);
+  const [isManualCheck, setIsManualCheck] = useState(false);
   
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<any>(null);
 
-  // Cleanup function
   const cleanup = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
@@ -69,15 +69,57 @@ const usePaymentMonitoring = (
     }
   }, []);
 
-  // Start monitoring
-  const startMonitoring = useCallback((_phoneNumber: string) => {  // FIXED: underscore prefix for unused param
+  // Manual payment check - EXPOSED FOR USER
+  const checkPaymentStatus = useCallback(async (): Promise<boolean> => {
+    if (!userId) return false;
+    
+    try {
+      const { data: payment, error } = await supabase
+        .from('payments')
+        .select('status, mpesa_receipt, updated_at')
+        .eq('user_id', userId)
+        .eq('payment_type', 'registration')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) {
+        console.error('Payment check error:', error);
+        return false;
+      }
+
+      console.log('Payment status check:', payment?.status);
+
+      if (payment?.status === 'completed') {
+        cleanup();
+        setStatus('success');
+        setMessage('Payment verified! Redirecting to dashboard...');
+        onSuccess();
+        return true;
+      }
+
+      if (payment?.status === 'failed') {
+        cleanup();
+        setStatus('failed');
+        onFailure('Payment failed. Please try again.');
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Payment check error:', error);
+      return false;
+    }
+  }, [userId, cleanup, onSuccess, onFailure]);
+
+  const startMonitoring = useCallback((_phoneNumber: string) => {
     if (!userId) return;
     
     setStatus('verifying');
     setMessage('Please check your phone and enter M-Pesa PIN to complete payment...');
-    setRemainingAttempts(6);
+    setRemainingAttempts(10);
+    setIsManualCheck(false);
 
-    // Setup realtime subscription
     channelRef.current = supabase
       .channel(`payment-${userId}`)
       .on(
@@ -89,6 +131,7 @@ const usePaymentMonitoring = (
           filter: `user_id=eq.${userId}`,
         },
         (payload) => {
+          console.log('Realtime payment update:', payload.new.status);
           if (payload.new.status === 'completed') {
             cleanup();
             setStatus('success');
@@ -101,61 +144,26 @@ const usePaymentMonitoring = (
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+      });
 
-    // Fallback polling
     let attempts = 0;
-    const maxAttempts = 6;
+    const maxAttempts = 10;
 
     const checkPayment = async () => {
       attempts++;
       setRemainingAttempts(maxAttempts - attempts);
-
-      try {
-        const { data: payment } = await supabase
-          .from('payments')
-          .select('status')
-          .eq('user_id', userId)
-          .eq('payment_type', 'registration')
-          .maybeSingle();
-
-        if (payment?.status === 'completed') {
-          cleanup();
-          setStatus('success');
-          onSuccess();
-          return true;
-        }
-
-        if (payment?.status === 'failed' || attempts >= maxAttempts) {
-          cleanup();
-          
-          if (attempts >= maxAttempts) {
-            // Timeout - cleanup
-            await supabase
-              .from('payments')
-              .update({ status: 'failed', updated_at: new Date().toISOString() })
-              .eq('user_id', userId)
-              .eq('payment_type', 'registration');
-            
-            await supabase
-              .from('profiles')
-              .update({ payment_status: 'failed' })
-              .eq('id', userId);
-
-            setStatus('failed');
-            onFailure('Payment not received within time limit. Please contact support.');
-          }
-          return true;
-        }
-
-        return false;
-      } catch (error) {
-        console.error('Payment check error:', error);
-        return false;
+      const shouldStop = await checkPaymentStatus();
+      if (!shouldStop && attempts >= maxAttempts) {
+        cleanup();
+        setStatus('failed');
+        onFailure('Payment verification timed out. Please check your M-Pesa messages and click "I\'ve Paid" if payment was deducted.');
+        return true;
       }
+      return shouldStop;
     };
 
-    // Initial check
     checkPayment().then(shouldStop => {
       if (!shouldStop) {
         intervalRef.current = setInterval(() => {
@@ -165,14 +173,23 @@ const usePaymentMonitoring = (
               intervalRef.current = null;
             }
           });
-        }, 5000);
+        }, 3000);
       }
     });
-  }, [userId, cleanup, onSuccess, onFailure]);
+  }, [userId, cleanup, onSuccess, onFailure, checkPaymentStatus]);
 
   useEffect(() => cleanup, [cleanup]);
 
-  return { status, message, remainingAttempts, startMonitoring, cleanup };
+  return { 
+    status, 
+    message, 
+    remainingAttempts, 
+    startMonitoring, 
+    cleanup,
+    checkPaymentStatus,
+    isManualCheck,
+    setIsManualCheck
+  };
 };
 
 export function SignupPage() {
@@ -208,38 +225,38 @@ export function SignupPage() {
   const agreedToPolicy = watch('agreedToPolicy');
   const phoneNumber = watch('phoneNumber');
 
-  // Payment monitoring
   const {
     status: paymentStatus,
     message: paymentMessage,
     remainingAttempts,
     startMonitoring,
     cleanup: cleanupPayment,
+    checkPaymentStatus,
+    isManualCheck,
+    setIsManualCheck
   } = usePaymentMonitoring(
     createdUserId,
     () => {
-      // On success - invalidate queries and redirect
+      console.log('✅ Payment success - initiating redirect...');
       queryClient.invalidateQueries({ queryKey: ['user'] });
-      setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
-    },
-    (_msg) => {  // FIXED: underscore prefix for unused param
-      // On failure
+      navigate('/dashboard', { replace: true });
       setTimeout(() => {
-        setShowPaymentDialog(false);
-        signupMutation.reset();
-      }, 3000);
+        if (window.location.pathname !== '/dashboard') {
+          window.location.href = '/dashboard';
+        }
+      }, 2000);
+    },
+    (msg) => {
+      console.log('❌ Payment failed:', msg);
     }
   );
 
-  // Cleanup on unmount
   useEffect(() => cleanupPayment, [cleanupPayment]);
 
-  // Signup mutation - uses RPC for profile setup
   const signupMutation = useMutation({
     mutationFn: async (data: SignupFormData) => {
       const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       
-      // 1. Create auth user (trigger automatically creates profile with basic data)
       const { data: authData, error: authError } = await signUp(
         data.email,
         data.password,
@@ -258,7 +275,6 @@ export function SignupPage() {
 
       const userId = authData.user.id;
 
-      // 2. Use RPC to setup/update profile with proper privileges (bypasses RLS)
       const { error: setupError } = await supabase.rpc('setup_user_profile', {
         p_user_id: userId,
         p_legal_name: data.legalName,
@@ -269,16 +285,12 @@ export function SignupPage() {
         p_referred_by: data.referralCode || null,
       });
 
-      if (setupError) {
-        throw setupError;
-      }
+      if (setupError) throw setupError;
 
-      // 3. Upload avatar if provided (optional, don't fail if this errors)
       if (avatarFile) {
         try {
           const avatarUrl = await uploadAvatar(userId, avatarFile);
           if (avatarUrl) {
-            // Use RPC to update avatar as well (safer for initial setup)
             await supabase.rpc('update_user_avatar', {
               p_user_id: userId,
               p_avatar_url: avatarUrl,
@@ -286,11 +298,9 @@ export function SignupPage() {
           }
         } catch (avatarError) {
           console.error('Avatar upload error:', avatarError);
-          // Continue without avatar - don't fail signup
         }
       }
 
-      // 4. Create referral record if referral code provided (optional)
       if (data.referralCode) {
         try {
           const { data: referrer } = await supabase
@@ -309,12 +319,12 @@ export function SignupPage() {
           }
         } catch (referralError) {
           console.error('Referral creation error:', referralError);
-          // Continue without referral - don't fail signup
         }
       }
 
       return { userId, phoneNumber: data.phoneNumber };
     },
+    retry: false,
     onSuccess: ({ userId }) => {
       setCreatedUserId(userId);
       setShowPaymentDialog(true);
@@ -324,12 +334,10 @@ export function SignupPage() {
     },
   });
 
-  // Payment initiation mutation
   const paymentMutation = useMutation({
     mutationFn: async ({ userId, phone }: { userId: string; phone: string }) => {
       const formattedPhone = phone.startsWith('254') ? phone : `254${phone.replace(/^0+/, '')}`;
 
-      // Create payment record
       const { data: result, error: rpcError } = await supabase.rpc(
         'initiate_registration_payment',
         { p_user_id: userId, p_phone_number: formattedPhone }
@@ -338,7 +346,6 @@ export function SignupPage() {
       if (rpcError) throw rpcError;
       if (!result?.success) throw new Error(result?.error || 'Failed to create payment record');
 
-      // Call M-Pesa STK Push
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mpesa-stk-push`,
         {
@@ -363,7 +370,7 @@ export function SignupPage() {
 
       return { userId, phone: formattedPhone };
     },
-    onSuccess: ({ userId: _userId, phone }) => {  // FIXED: underscore prefix for unused param
+    onSuccess: ({ userId: _userId, phone }) => {
       startMonitoring(phone);
     },
     onError: (error: any) => {
@@ -371,7 +378,6 @@ export function SignupPage() {
     },
   });
 
-  // File handling
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -415,6 +421,25 @@ export function SignupPage() {
     if (createdUserId && phoneNumber) {
       paymentMutation.mutate({ userId: createdUserId, phone: phoneNumber });
     }
+  };
+
+  const handleManualCheck = async () => {
+    setIsManualCheck(true);
+    const isComplete = await checkPaymentStatus();
+    if (!isComplete) {
+      alert('Payment still pending. If you completed the M-Pesa payment on your phone, please wait 1-2 minutes and try again, or contact support.');
+    }
+    setIsManualCheck(false);
+  };
+
+  const handleGoToDashboard = () => {
+    queryClient.invalidateQueries({ queryKey: ['user'] });
+    navigate('/dashboard', { replace: true });
+    setTimeout(() => {
+      if (window.location.pathname !== '/dashboard') {
+        window.location.href = '/dashboard';
+      }
+    }, 1000);
   };
 
   const isSubmitting = signupMutation.isPending || paymentMutation.isPending;
@@ -698,7 +723,7 @@ export function SignupPage() {
         </GlassCard>
       </div>
 
-      {/* Payment Dialog */}
+      {/* Payment Dialog - FIXED WITH ALL MANUAL BUTTONS */}
       <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
         <DialogContent className="bg-ninja-dark/95 backdrop-blur-xl border-ninja-green/20 max-w-md">
           <DialogHeader>
@@ -744,17 +769,50 @@ export function SignupPage() {
                 </div>
                 <p className="text-ninja-sage text-center">{paymentMessage}</p>
                 <p className="text-xs text-ninja-sage/70 text-center">
-                  Checking payment status... ({remainingAttempts} attempts remaining)
+                  Auto-checking... ({remainingAttempts} attempts remaining)
+                </p>
+                
+                {/* MANUAL CHECK BUTTON */}
+                <Button 
+                  onClick={handleManualCheck}
+                  variant="outline"
+                  disabled={isManualCheck}
+                  className="w-full border-ninja-green/30 text-ninja-green hover:bg-ninja-green/10"
+                >
+                  {isManualCheck ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Checking...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      I've Paid - Check Status
+                    </>
+                  )}
+                </Button>
+                
+                <p className="text-xs text-ninja-sage/50 text-center">
+                  If you completed payment but see this, click the button above
                 </p>
               </>
             )}
 
             {paymentStatus === 'success' && (
               <>
-                <div className="w-20 h-20 rounded-full bg-ninja-green/30 flex items-center justify-center border border-ninja-green">
+                <div className="w-20 h-20 rounded-full bg-ninja-green/30 flex items-center justify-center border border-ninja-green animate-pulse">
                   <Check className="w-10 h-10 text-ninja-green" />
                 </div>
                 <p className="text-ninja-green text-center font-medium">{paymentMessage}</p>
+                
+                {/* MANUAL DASHBOARD BUTTON */}
+                <Button 
+                  onClick={handleGoToDashboard}
+                  className="btn-primary w-full"
+                >
+                  Go to Dashboard
+                  <ArrowRight className="w-5 h-5 ml-2" />
+                </Button>
               </>
             )}
 
@@ -764,6 +822,24 @@ export function SignupPage() {
                   <span className="text-red-400 text-3xl">×</span>
                 </div>
                 <p className="text-red-400 text-center">{paymentMessage}</p>
+                
+                <div className="flex gap-2 w-full">
+                  <Button 
+                    onClick={handlePayNow}
+                    variant="outline"
+                    className="flex-1 border-ninja-green/30 text-ninja-green"
+                  >
+                    Try Again
+                  </Button>
+                  <Button 
+                    onClick={handleManualCheck}
+                    variant="outline"
+                    disabled={isManualCheck}
+                    className="flex-1 border-ninja-green/30 text-ninja-green"
+                  >
+                    {isManualCheck ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Check Status'}
+                  </Button>
+                </div>
               </>
             )}
           </div>
