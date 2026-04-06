@@ -11,6 +11,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
@@ -32,11 +33,7 @@ interface ActivityItem {
 }
 
 // Query keys
-const adminKeys = {
-  all: ['admin'] as const,
-  stats: () => [...adminKeys.all, 'stats'] as const,
-  activity: () => [...adminKeys.all, 'activity'] as const,
-};
+const adminKeys = queryKeys.admin;
 
 // Parallel stats fetching - all 6 queries fire simultaneously
 const fetchAdminStats = async (): Promise<AdminStats> => {

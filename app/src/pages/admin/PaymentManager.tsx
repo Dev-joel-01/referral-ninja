@@ -13,6 +13,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -40,11 +41,7 @@ interface WithdrawalWithUser {
 }
 
 // Query keys
-const paymentKeys = {
-  all: ['payments'] as const,
-  withdrawals: () => [...paymentKeys.all, 'withdrawals'] as const,
-  stats: () => [...paymentKeys.all, 'stats'] as const,
-};
+const paymentKeys = queryKeys.payment;
 
 // FIXED: Explicit foreign key specification
 const fetchWithdrawals = async (): Promise<WithdrawalWithUser[]> => {

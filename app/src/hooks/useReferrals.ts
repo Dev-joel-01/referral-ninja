@@ -1,12 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import type { ReferralStats } from '@/types';
 
-export const referralKeys = {
-  all: ['referrals'] as const,
-  stats: (userId: string) => [...referralKeys.all, 'stats', userId] as const,
-  list: (userId: string) => [...referralKeys.all, 'list', userId] as const,
-};
+export const referralKeys = queryKeys.referral;
 
 // Real-time referral stats with background updates
 export function useReferralStats(userId: string) {

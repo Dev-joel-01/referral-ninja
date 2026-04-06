@@ -12,6 +12,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
@@ -23,11 +24,7 @@ interface UserWithStats extends Profile {
 }
 
 // Query keys
-const userKeys = {
-  all: ['users'] as const,
-  list: (search: string) => [...userKeys.all, 'list', search] as const,
-  stats: () => [...userKeys.all, 'stats'] as const,
-};
+const userKeys = queryKeys.user;
 
 // SINGLE efficient query using Supabase joins/aggregations
 // Replaces N+1 queries with 1 query

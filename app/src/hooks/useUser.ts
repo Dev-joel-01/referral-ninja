@@ -1,12 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import type { User } from '@/types';
 
-export const userKeys = {
-  all: ['user'] as const,
-  current: () => [...userKeys.all, 'current'] as const,
-  profile: (id: string) => [...userKeys.all, 'profile', id] as const,
-};
+export const userKeys = queryKeys.user;
 
 // Current user with caching - prevents auth flickering
 export function useCurrentUser() {

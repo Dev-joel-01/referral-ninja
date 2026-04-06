@@ -12,6 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -34,11 +35,7 @@ interface MafulluPurchase {
 }
 
 // Query keys
-const mafulluKeys = {
-  all: ['mafullu'] as const,
-  purchases: (userId: string) => [...mafulluKeys.all, 'purchases', userId] as const,
-  available: () => [...mafulluKeys.all, 'available'] as const,
-};
+const mafulluKeys = queryKeys.mafullu;
 
 // Fetch user's purchases
 const fetchPurchases = async (userId: string): Promise<MafulluPurchase[]> => {
@@ -82,7 +79,7 @@ export function MafulluPage() {
     isFetching,
     error,
   } = useQuery({
-    queryKey: mafulluKeys.purchases(user?.id || ''),
+    queryKey: queryKeys.mafullu.purchased(user?.id || ''),
     queryFn: () => fetchPurchases(user!.id),
     enabled: !!user,
     staleTime: 60 * 1000,

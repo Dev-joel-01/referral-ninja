@@ -14,6 +14,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
@@ -35,11 +36,7 @@ interface TopReferrer {
 }
 
 // Query keys for granular cache control
-const dashboardKeys = {
-  all: ['dashboard'] as const,
-  stats: (userId: string) => [...dashboardKeys.all, 'stats', userId] as const,
-  topReferrers: () => [...dashboardKeys.all, 'topReferrers'] as const,
-};
+const dashboardKeys = queryKeys.dashboard;
 
 // Parallel data fetching - all requests fire simultaneously
 const fetchDashboardStats = async (userId: string): Promise<DashboardStats> => {

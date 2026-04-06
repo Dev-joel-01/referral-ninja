@@ -1,12 +1,10 @@
 // hooks/use-auth.ts
 import { useQuery, useQueryClient,  } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import type { Profile } from '@/types';
 
-export const authKeys = {
-  all: ['auth'] as const,
-  user: () => [...authKeys.all, 'user'] as const,
-};
+export const authKeys = queryKeys.auth;
 
 // Core query - this is your single source of truth
 export function useAuthUser() {

@@ -12,6 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -21,11 +22,7 @@ import type { Task } from '@/types';
 type TaskType = 'remote' | 'local_intern' | 'local_job';
 
 // Query key factory for granular cache control
-const taskKeys = {
-  all: ['tasks'] as const,
-  list: (type?: TaskType) => [...taskKeys.all, 'list', type] as const,
-  clicked: (userId: string) => [...taskKeys.all, 'clicked', userId] as const,
-};
+const taskKeys = queryKeys.task;
 
 // Helper to get image URL - handles multiple formats
 const getTaskImageUrl = (path: string | null): string | null => {

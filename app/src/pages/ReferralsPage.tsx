@@ -15,6 +15,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -42,12 +43,7 @@ interface ReferralStats {
 }
 
 // Query keys - shared with DashboardPage for cache efficiency
-const referralKeys = {
-  all: ['referrals'] as const,
-  list: (userId: string) => [...referralKeys.all, 'list', userId] as const,
-  stats: (userId: string) => [...referralKeys.all, 'stats', userId] as const,
-  topReferrers: () => [...referralKeys.all, 'topReferrers'] as const,
-};
+const referralKeys = queryKeys.referral;
 
 // Parallel data fetching for user's referrals and stats
 const fetchReferralData = async (userId: string): Promise<{ referrals: Referral[]; stats: ReferralStats }> => {

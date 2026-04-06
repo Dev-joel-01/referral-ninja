@@ -18,6 +18,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GlassCard } from '@/components/layout/GlassCard';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
+import { queryKeys } from '@/lib/queryKeys';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -49,11 +50,7 @@ interface PaymentStats {
 }
 
 // Query keys
-const paymentKeys = {
-  all: ['payments'] as const,
-  stats: (userId: string) => [...paymentKeys.all, 'stats', userId] as const,
-  withdrawals: (userId: string) => [...paymentKeys.all, 'withdrawals', userId] as const,
-};
+const paymentKeys = queryKeys.payment;
 
 // Parallel data fetching
 const fetchPaymentData = async (userId: string): Promise<{ stats: PaymentStats; withdrawals: Withdrawal[] }> => {
