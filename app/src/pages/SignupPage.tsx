@@ -72,7 +72,7 @@ const usePaymentMonitoring = (
   // Manual payment check - EXPOSED FOR USER
   const checkPaymentStatus = useCallback(async (): Promise<boolean> => {
     if (!userId) return false;
-    
+
     try {
       const { data: payment, error } = await supabase
         .from('payments')
@@ -112,6 +112,7 @@ const usePaymentMonitoring = (
     }
   }, [userId, cleanup, onSuccess, onFailure]);
 
+  // Start monitoring
   const startMonitoring = useCallback((_phoneNumber: string) => {
     if (!userId) return;
     
@@ -239,12 +240,7 @@ export function SignupPage() {
     () => {
       console.log('✅ Payment success - initiating redirect...');
       queryClient.invalidateQueries({ queryKey: ['user'] });
-      navigate('/dashboard', { replace: true });
-      setTimeout(() => {
-        if (window.location.pathname !== '/dashboard') {
-          window.location.href = '/dashboard';
-        }
-      }, 2000);
+      setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
     },
     (msg) => {
       console.log('❌ Payment failed:', msg);
@@ -324,7 +320,7 @@ export function SignupPage() {
 
       return { userId, phoneNumber: data.phoneNumber };
     },
-    retry: false,
+    retry: false, // FIX: Prevent 429 rate limit errors on retry
     onSuccess: ({ userId }) => {
       setCreatedUserId(userId);
       setShowPaymentDialog(true);
@@ -338,13 +334,19 @@ export function SignupPage() {
     mutationFn: async ({ userId, phone }: { userId: string; phone: string }) => {
       const formattedPhone = phone.startsWith('254') ? phone : `254${phone.replace(/^0+/, '')}`;
 
+      // Create payment record via RPC
       const { data: result, error: rpcError } = await supabase.rpc(
         'initiate_registration_payment',
         { p_user_id: userId, p_phone_number: formattedPhone }
       );
 
       if (rpcError) throw rpcError;
-      if (!result?.success) throw new Error(result?.error || 'Failed to create payment record');
+      
+      // FIX: Handle the actual response structure from your SQL function
+      // Your function returns { success: true, payment_id: "..." } or { success: false, error: "..." }
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to create payment record');
+      }
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mpesa-stk-push`,
