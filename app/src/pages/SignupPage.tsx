@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -55,9 +55,11 @@ export function SignupPage() {
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'verifying' | 'success' | 'failed'>('pending');
   const [paymentMessage, setPaymentMessage] = useState('');
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
+  const [remainingAttempts, setRemainingAttempts] = useState(6);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const paymentCheckInterval = useRef<NodeJS.Timeout | null>(null);
+  const realtimeChannel = useRef<any>(null);
 
   const {
     register,
@@ -74,6 +76,18 @@ export function SignupPage() {
   });
 
   const agreedToPolicy = watch('agreedToPolicy');
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (paymentCheckInterval.current) {
+        clearInterval(paymentCheckInterval.current);
+      }
+      if (realtimeChannel.current) {
+        supabase.removeChannel(realtimeChannel.current);
+      }
+    };
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -118,55 +132,182 @@ export function SignupPage() {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
   };
 
+  // Setup realtime subscription for instant payment updates
+  const setupRealtimeSubscription = (userId: string) => {
+    realtimeChannel.current = supabase
+      .channel(`payment-${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'payments',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          console.log('Realtime payment update:', payload);
+          if (payload.new.status === 'completed') {
+            handlePaymentSuccess(userId);
+          } else if (payload.new.status === 'failed') {
+            handlePaymentFailure();
+          }
+        }
+      )
+      .subscribe();
+  };
+
+  const handlePaymentSuccess = async (userId: string) => {
+    // Clear interval and realtime
+    if (paymentCheckInterval.current) {
+      clearInterval(paymentCheckInterval.current);
+      paymentCheckInterval.current = null;
+    }
+    if (realtimeChannel.current) {
+      supabase.removeChannel(realtimeChannel.current);
+    }
+
+    // Update profile status
+    await supabase
+      .from('profiles')
+      .update({ 
+        payment_status: 'completed',
+        payment_verified_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    setPaymentStatus('success');
+    setPaymentMessage('Payment verified! Redirecting to dashboard...');
+
+    // Navigate to dashboard
+    setTimeout(() => {
+      navigate('/dashboard', { replace: true });
+    }, 2000);
+  };
+
+  const handlePaymentFailure = async () => {
+    if (paymentCheckInterval.current) {
+      clearInterval(paymentCheckInterval.current);
+      paymentCheckInterval.current = null;
+    }
+
+    setPaymentStatus('failed');
+    setPaymentMessage('Payment failed. Please try again.');
+
+    setTimeout(() => {
+      setShowPaymentDialog(false);
+      setIsSubmitting(false);
+    }, 3000);
+  };
+
   const checkPaymentStatus = async (userId: string) => {
     let attempts = 0;
-    const maxAttempts = 6; // 30 seconds total (5s intervals)
-    
-    paymentCheckInterval.current = setInterval(async () => {
+    const maxAttempts = 6;
+
+    // Clear any existing interval
+    if (paymentCheckInterval.current) {
+      clearInterval(paymentCheckInterval.current);
+      paymentCheckInterval.current = null;
+    }
+
+    const checkOnce = async (): Promise<boolean> => {
       attempts++;
-      
-      const { data: payment } = await supabase
-        .from('payments')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('payment_type', 'registration')
-        .single();
-      
-      if (payment?.status === 'completed') {
-        if (paymentCheckInterval.current) {
-          clearInterval(paymentCheckInterval.current);
+      setRemainingAttempts(maxAttempts - attempts);
+      console.log(`Payment check attempt ${attempts}/${maxAttempts}`);
+
+      try {
+        const { data: payment, error } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('payment_type', 'registration')
+          .maybeSingle();
+
+        if (error) {
+          console.error('Payment check query error:', error);
+          return false;
         }
-        setPaymentStatus('success');
-        setPaymentMessage('Payment verified! Redirecting to dashboard...');
-        setTimeout(() => {
-          navigate('/dashboard');
-        }, 2000);
-      } else if (attempts >= maxAttempts) {
-        if (paymentCheckInterval.current) {
-          clearInterval(paymentCheckInterval.current);
+
+        // SUCCESS
+        if (payment?.status === 'completed') {
+          await handlePaymentSuccess(userId);
+          return true;
         }
-        // Delete user data if payment not received
-        await supabase.auth.admin.deleteUser(userId);
-        await supabase.from('profiles').delete().eq('id', userId);
-        setPaymentStatus('failed');
-        setPaymentMessage('Payment not received. Please try again.');
-        setTimeout(() => {
-          setShowPaymentDialog(false);
-          setIsSubmitting(false);
-        }, 3000);
+
+        // FAILED
+        if (payment?.status === 'failed') {
+          await handlePaymentFailure();
+          return true;
+        }
+
+        // TIMEOUT
+        if (attempts >= maxAttempts) {
+          console.log('Payment verification timeout');
+
+          if (paymentCheckInterval.current) {
+            clearInterval(paymentCheckInterval.current);
+            paymentCheckInterval.current = null;
+          }
+
+          // Update payment and profile to failed
+          await supabase
+            .from('payments')
+            .update({ status: 'failed', updated_at: new Date().toISOString() })
+            .eq('user_id', userId)
+            .eq('payment_type', 'registration');
+
+          await supabase
+            .from('profiles')
+            .update({ payment_status: 'failed' })
+            .eq('id', userId);
+
+          // Delete user after timeout
+          try {
+            await supabase.auth.admin.deleteUser(userId);
+            await supabase.from('profiles').delete().eq('id', userId);
+          } catch (cleanupError) {
+            console.error('Cleanup error:', cleanupError);
+          }
+
+          setPaymentStatus('failed');
+          setPaymentMessage('Payment not received within time limit. Account removed.');
+
+          setTimeout(() => {
+            setShowPaymentDialog(false);
+            setIsSubmitting(false);
+          }, 3000);
+
+          return true;
+        }
+
+        return false;
+      } catch (error) {
+        console.error('Payment check error:', error);
+        return false;
+      }
+    };
+
+    // Run first check immediately
+    const shouldStop = await checkOnce();
+    if (shouldStop) return;
+
+    // Set up interval for subsequent checks
+    paymentCheckInterval.current = setInterval(async () => {
+      const stop = await checkOnce();
+      if (stop && paymentCheckInterval.current) {
+        clearInterval(paymentCheckInterval.current);
+        paymentCheckInterval.current = null;
       }
     }, 5000);
   };
 
-  // UPDATED: Use RPC database function to safely create payment
   const initiatePayment = async (userId: string, phoneNumber: string) => {
     try {
-      // Ensure phone number starts with 254
       const formattedPhone = phoneNumber.startsWith('254')
         ? phoneNumber
         : `254${phoneNumber.replace(/^0+/, '')}`;
 
-      // Call database function to safely create payment
+      // Call database function to create payment
       const { data: result, error: rpcError } = await supabase.rpc(
         'initiate_registration_payment',
         {
@@ -175,13 +316,11 @@ export function SignupPage() {
         }
       );
 
-      if (rpcError) {
-        throw rpcError;
-      }
+      if (rpcError) throw rpcError;
+      if (!result?.success) throw new Error(result?.error || 'Failed to create payment record');
 
-      if (!result?.success) {
-        throw new Error(result?.error || 'Failed to create payment record');
-      }
+      // Setup realtime subscription for instant updates
+      setupRealtimeSubscription(userId);
 
       // Call M-Pesa STK Push
       const response = await fetch(
@@ -205,6 +344,9 @@ export function SignupPage() {
 
       setPaymentStatus('verifying');
       setPaymentMessage('Please check your phone and enter M-Pesa PIN to complete payment...');
+      setRemainingAttempts(6);
+      
+      // Start checking payment status
       checkPaymentStatus(userId);
       
     } catch (error: any) {
@@ -212,7 +354,6 @@ export function SignupPage() {
       setPaymentStatus('failed');
       setPaymentMessage(error.message || 'Failed to initiate payment. Please try again.');
       
-      // Clean up on failure
       setTimeout(() => {
         setShowPaymentDialog(false);
         setIsSubmitting(false);
@@ -224,8 +365,9 @@ export function SignupPage() {
     setIsSubmitting(true);
     
     try {
-      // 1. Create auth user
       const referralCode = generateReferralCode();
+      
+      // 1. Create auth user
       const { data: authData, error: authError } = await signUp(
         data.email,
         data.password,
@@ -245,7 +387,7 @@ export function SignupPage() {
       const userId = authData.user.id;
       setCreatedUserId(userId);
 
-      // 2. EXPLICITLY CREATE PROFILE (don't rely solely on trigger)
+      // 2. Create profile explicitly
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
@@ -256,10 +398,10 @@ export function SignupPage() {
           phone_number: data.phoneNumber,
           referral_code: referralCode,
           referred_by: data.referralCode || null,
+          payment_status: 'pending',
         });
 
       if (profileError) {
-        // If profile creation fails, clean up auth user
         await supabase.auth.admin.deleteUser(userId);
         throw profileError;
       }
@@ -312,7 +454,6 @@ export function SignupPage() {
       <DemoModeBanner />
       <CursorGlow />
       
-      {/* Background Elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 -left-32 w-64 h-64 bg-ninja-green/5 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 -right-32 w-64 h-64 bg-ninja-green/5 rounded-full blur-3xl" />
@@ -320,7 +461,6 @@ export function SignupPage() {
 
       <div className="relative z-10 min-h-screen flex items-center justify-center p-4 py-12">
         <GlassCard className="w-full max-w-2xl" glow>
-          {/* Header */}
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-ninja-green/20 border border-ninja-green/30 mb-4">
               <span className="text-ninja-green font-heading font-bold text-3xl">N</span>
@@ -621,7 +761,7 @@ export function SignupPage() {
                 </div>
                 <p className="text-ninja-sage text-center">{paymentMessage}</p>
                 <p className="text-xs text-ninja-sage/70 text-center">
-                  Checking payment status... ({Math.ceil(30 / 5)} attempts remaining)
+                  Checking payment status... ({remainingAttempts} attempts remaining)
                 </p>
               </>
             )}

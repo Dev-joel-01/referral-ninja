@@ -1,7 +1,8 @@
-// M-Pesa STK Push Edge Function
-// Updated: 2026-04-04 13:57
+// M-Pesa STK Push Edge Function - FIXED VERSION
+// Updated: 2026-04-05
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -106,6 +107,14 @@ serve(async (req) => {
       );
     }
     
+    // Initialize Supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    
+    // Extract userId from accountReference (REG-userId)
+    const userId = accountReference.replace('REG-', '');
+    
     const config: MpesaConfig = {
       consumerKey: Deno.env.get('MPESA_CONSUMER_KEY') || '',
       consumerSecret: Deno.env.get('MPESA_CONSUMER_SECRET') || '',
@@ -134,17 +143,36 @@ serve(async (req) => {
     
     console.log('M-Pesa STK response:', mpesaResponse);
     
-    // ✅ CRITICAL FIX: Return checkoutRequestId and merchantRequestId in expected format
+    // ✅ CRITICAL FIX: Update payment record with checkout_request_id
+    // This allows the callback to find and update the payment later
+    if (mpesaResponse.CheckoutRequestID) {
+      const { error: updateError } = await supabase
+        .from('payments')
+        .update({
+          checkout_request_id: mpesaResponse.CheckoutRequestID,
+          merchant_request_id: mpesaResponse.MerchantRequestID,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .eq('payment_type', 'registration')
+        .eq('status', 'pending');
+      
+      if (updateError) {
+        console.error('Failed to update payment with checkout_request_id:', updateError);
+        // Continue anyway - don't fail the STK push
+      } else {
+        console.log('Payment record updated with checkout_request_id:', mpesaResponse.CheckoutRequestID);
+      }
+    }
+    
     return new Response(
       JSON.stringify({
         success: true,
         message: 'STK push initiated successfully',
-        checkoutRequestId: mpesaResponse.CheckoutRequestID,  // ✅ Matches signup page
-        merchantRequestId: mpesaResponse.MerchantRequestID,    // ✅ Matches signup page
+        checkoutRequestId: mpesaResponse.CheckoutRequestID,
+        merchantRequestId: mpesaResponse.MerchantRequestID,
         responseCode: mpesaResponse.ResponseCode,
         responseDescription: mpesaResponse.ResponseDescription,
-        // Keep raw data for debugging
-        raw: mpesaResponse,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

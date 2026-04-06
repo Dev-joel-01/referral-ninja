@@ -1,150 +1,137 @@
-// M-Pesa Callback Handler
-// Updated: 2026-04-04 13:51
-
+// supabase/functions/mpesa-callback/index.ts (UPDATED)
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-content',
 };
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
-  
+
   try {
     const callbackData = await req.json();
-    console.log('M-Pesa callback received:', JSON.stringify(callbackData));
-    
-    // Extract data from callback
+    console.log('M-Pesa callback received:', JSON.stringify(callbackData, null, 2));
+
     const { Body } = callbackData;
-    
-    if (!Body || !Body.stkCallback) {
+    if (!Body?.stkCallback) {
       return new Response(
         JSON.stringify({ error: 'Invalid callback data' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-    
-    const { stkCallback } = Body;
+
     const {
       MerchantRequestID,
       CheckoutRequestID,
       ResultCode,
       ResultDesc,
       CallbackMetadata,
-    } = stkCallback;
-    
-    // Initialize Supabase client
+    } = Body.stkCallback;
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-    
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // ✅ FIXED: Extract all metadata items (not just receipt)
-    let mpesaReceiptNumber = null;
+
+    // Extract metadata
+    let mpesaReceipt = null;
     let amount = null;
     let phoneNumber = null;
-    
-    if (CallbackMetadata && CallbackMetadata.Item) {
+
+    if (CallbackMetadata?.Item) {
       const items = CallbackMetadata.Item;
-      
-      const receiptItem = items.find((item: any) => item.Name === 'MpesaReceiptNumber');
-      mpesaReceiptNumber = receiptItem?.Value || null;
-      
-      const amountItem = items.find((item: any) => item.Name === 'Amount');
-      amount = amountItem?.Value || null;
-      
-      const phoneItem = items.find((item: any) => item.Name === 'PhoneNumber');
-      phoneNumber = phoneItem?.Value?.toString() || null;
+      mpesaReceipt = items.find((i: any) => i.Name === 'MpesaReceiptNumber')?.Value || null;
+      amount = items.find((i: any) => i.Name === 'Amount')?.Value || null;
+      phoneNumber = items.find((i: any) => i.Name === 'PhoneNumber')?.Value?.toString() || null;
     }
-    
-    // ✅ FIXED: Build update data dynamically
+
+    // 1. Find payment by checkout_request_id
+    const { data: payment, error: findError } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('checkout_request_id', CheckoutRequestID)
+      .single();
+
+    if (findError || !payment) {
+      console.error('Payment not found:', findError);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Payment not found' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 2. Idempotency check: Already processed?
+    if (payment.status === 'completed') {
+      console.log('Payment already processed:', payment.id);
+      return new Response(
+        JSON.stringify({ success: true, message: 'Already processed' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 3. Update payment status
     const updateData: any = {
       status: ResultCode === 0 ? 'completed' : 'failed',
       merchant_request_id: MerchantRequestID,
       updated_at: new Date().toISOString(),
     };
-    
-    if (mpesaReceiptNumber) updateData.mpesa_receipt = mpesaReceiptNumber;
+
+    if (mpesaReceipt) updateData.mpesa_receipt = mpesaReceipt;
     if (amount !== null) updateData.amount = amount;
     if (phoneNumber) updateData.phone_number = phoneNumber;
-    
-    console.log('Updating payment:', { CheckoutRequestID, updateData });
-    
-    // ✅ CRITICAL FIX: Update by checkout_request_id (not merchant_request_id)
-    // This matches how your signup code stores it
-    const { data: updatedPayments, error: updateError } = await supabase
+
+    const { error: updateError } = await supabase
       .from('payments')
       .update(updateData)
-      .eq('checkout_request_id', CheckoutRequestID)  // ✅ FIXED
-      .select();
-    
+      .eq('checkout_request_id', CheckoutRequestID);
+
     if (updateError) {
-      console.error('Error updating payment:', updateError);
+      console.error('Failed to update payment:', updateError);
       return new Response(
         JSON.stringify({ success: false, error: 'Database update failed' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-    
-    // ✅ FIXED: Handle case where no payment record found
-    if (!updatedPayments || updatedPayments.length === 0) {
-      console.warn('Payment not found for checkout_request_id:', CheckoutRequestID);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Payment record not found', checkoutRequestId: CheckoutRequestID }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    const payment = updatedPayments[0];
-    console.log('Payment updated:', payment.id);
-    
-    // If payment was successful, update user's payment status
+
+    // 4. If successful, update profiles and referrals
     if (ResultCode === 0) {
-      console.log('Activating user:', payment.user_id);
-      
+      console.log('Payment successful, activating user:', payment.user_id);
+
+      // Update profiles table (triggers realtime notification)
+      await supabase
+        .from('profiles')
+        .update({
+          payment_status: 'completed',
+          payment_verified_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', payment.user_id);
+
+      // Complete referral if exists
       if (payment.payment_type === 'registration') {
         await supabase
-          .from('profiles')
+          .from('referrals')
           .update({
-            payment_status: 'completed',
-            payment_verified_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
+            status: 'completed',
+            earned_amount: 100,
+            completed_at: new Date().toISOString(),
           })
-          .eq('id', payment.user_id);
-      } else if (payment.payment_type === 'mafullu') {
-        await supabase
-          .from('mafullu_purchases')
-          .update({
-            payment_status: 'completed',
-            purchased_at: new Date().toISOString(),
-          })
-          .eq('user_id', payment.user_id)
-          .eq('payment_status', 'pending');
+          .eq('referred_id', payment.user_id);
       }
     }
-    
+
     return new Response(
-      JSON.stringify({
-        success: true,
-        message: 'Callback processed successfully',
-        paymentId: payment.id,
-      }),
+      JSON.stringify({ success: true, message: 'Callback processed' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
-    
+
   } catch (error) {
-    console.error('Error in mpesa-callback:', error);
-    
+    console.error('Callback error:', error);
     return new Response(
-      JSON.stringify({
-        success: false,
-        error: error.message || 'Internal server error',
-      }),
+      JSON.stringify({ success: false, error: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
