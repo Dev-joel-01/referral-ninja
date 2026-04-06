@@ -70,7 +70,7 @@ const usePaymentMonitoring = (
   }, []);
 
   // Start monitoring
-  const startMonitoring = useCallback((_phoneNumber: string) => {  // FIXED: underscore prefix for unused param
+  const startMonitoring = useCallback((_phoneNumber: string) => {
     if (!userId) return;
     
     setStatus('verifying');
@@ -222,7 +222,7 @@ export function SignupPage() {
       queryClient.invalidateQueries({ queryKey: ['user'] });
       setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
     },
-    (_msg) => {  // FIXED: underscore prefix for unused param
+    (_msg) => {
       // On failure
       setTimeout(() => {
         setShowPaymentDialog(false);
@@ -315,6 +315,7 @@ export function SignupPage() {
 
       return { userId, phoneNumber: data.phoneNumber };
     },
+    retry: false, // FIX: Prevent 429 rate limit errors on retry
     onSuccess: ({ userId }) => {
       setCreatedUserId(userId);
       setShowPaymentDialog(true);
@@ -329,14 +330,19 @@ export function SignupPage() {
     mutationFn: async ({ userId, phone }: { userId: string; phone: string }) => {
       const formattedPhone = phone.startsWith('254') ? phone : `254${phone.replace(/^0+/, '')}`;
 
-      // Create payment record
+      // Create payment record via RPC
       const { data: result, error: rpcError } = await supabase.rpc(
         'initiate_registration_payment',
         { p_user_id: userId, p_phone_number: formattedPhone }
       );
 
       if (rpcError) throw rpcError;
-      if (!result?.success) throw new Error(result?.error || 'Failed to create payment record');
+      
+      // FIX: Handle the actual response structure from your SQL function
+      // Your function returns { success: true, payment_id: "..." } or { success: false, error: "..." }
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to create payment record');
+      }
 
       // Call M-Pesa STK Push
       const response = await fetch(
@@ -363,7 +369,7 @@ export function SignupPage() {
 
       return { userId, phone: formattedPhone };
     },
-    onSuccess: ({ userId: _userId, phone }) => {  // FIXED: underscore prefix for unused param
+    onSuccess: ({ userId: _userId, phone }) => {
       startMonitoring(phone);
     },
     onError: (error: any) => {
