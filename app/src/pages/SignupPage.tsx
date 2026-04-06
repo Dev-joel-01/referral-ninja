@@ -70,7 +70,7 @@ const usePaymentMonitoring = (
   }, []);
 
   // Start monitoring
-  const startMonitoring = useCallback((_phoneNumber: string) => {
+  const startMonitoring = useCallback((_phoneNumber: string) => {  // FIXED: underscore prefix for unused param
     if (!userId) return;
     
     setStatus('verifying');
@@ -142,16 +142,8 @@ const usePaymentMonitoring = (
               .update({ payment_status: 'failed' })
               .eq('id', userId);
 
-            // Cleanup user
-            try {
-              await supabase.auth.admin.deleteUser(userId);
-              await supabase.from('profiles').delete().eq('id', userId);
-            } catch (e) {
-              console.error('Cleanup error:', e);
-            }
-            
             setStatus('failed');
-            onFailure('Payment not received within time limit. Account removed.');
+            onFailure('Payment not received within time limit. Please contact support.');
           }
           return true;
         }
@@ -230,7 +222,7 @@ export function SignupPage() {
       queryClient.invalidateQueries({ queryKey: ['user'] });
       setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
     },
-    (_msg) => {
+    (_msg) => {  // FIXED: underscore prefix for unused param
       // On failure
       setTimeout(() => {
         setShowPaymentDialog(false);
@@ -242,12 +234,12 @@ export function SignupPage() {
   // Cleanup on unmount
   useEffect(() => cleanupPayment, [cleanupPayment]);
 
-  // Signup mutation
+  // Signup mutation - uses RPC for profile setup
   const signupMutation = useMutation({
     mutationFn: async (data: SignupFormData) => {
       const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       
-      // 1. Create auth user
+      // 1. Create auth user (trigger automatically creates profile with basic data)
       const { data: authData, error: authError } = await signUp(
         data.email,
         data.password,
@@ -266,46 +258,58 @@ export function SignupPage() {
 
       const userId = authData.user.id;
 
-      // 2. Create profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({
-          id: userId,
-          legal_name: data.legalName,
-          username: data.username,
-          email: data.email,
-          phone_number: data.phoneNumber,
-          referral_code: referralCode,
-          referred_by: data.referralCode || null,
-          payment_status: 'pending',
-        });
+      // 2. Use RPC to setup/update profile with proper privileges (bypasses RLS)
+      const { error: setupError } = await supabase.rpc('setup_user_profile', {
+        p_user_id: userId,
+        p_legal_name: data.legalName,
+        p_username: data.username,
+        p_email: data.email,
+        p_phone_number: data.phoneNumber,
+        p_referral_code: referralCode,
+        p_referred_by: data.referralCode || null,
+      });
 
-      if (profileError) {
-        await supabase.auth.admin.deleteUser(userId);
-        throw profileError;
+      if (setupError) {
+        throw setupError;
       }
 
-      // 3. Upload avatar
+      // 3. Upload avatar if provided (optional, don't fail if this errors)
       if (avatarFile) {
-        const avatarUrl = await uploadAvatar(userId, avatarFile);
-        await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('id', userId);
+        try {
+          const avatarUrl = await uploadAvatar(userId, avatarFile);
+          if (avatarUrl) {
+            // Use RPC to update avatar as well (safer for initial setup)
+            await supabase.rpc('update_user_avatar', {
+              p_user_id: userId,
+              p_avatar_url: avatarUrl,
+            });
+          }
+        } catch (avatarError) {
+          console.error('Avatar upload error:', avatarError);
+          // Continue without avatar - don't fail signup
+        }
       }
 
-      // 4. Create referral record
+      // 4. Create referral record if referral code provided (optional)
       if (data.referralCode) {
-        const { data: referrer } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('referral_code', data.referralCode)
-          .single();
-        
-        if (referrer) {
-          await supabase.from('referrals').insert({
-            referrer_id: referrer.id,
-            referred_id: userId,
-            status: 'pending',
-            earned_amount: 0,
-          });
+        try {
+          const { data: referrer } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('referral_code', data.referralCode)
+            .single();
+          
+          if (referrer) {
+            await supabase.from('referrals').insert({
+              referrer_id: referrer.id,
+              referred_id: userId,
+              status: 'pending',
+              earned_amount: 0,
+            });
+          }
+        } catch (referralError) {
+          console.error('Referral creation error:', referralError);
+          // Continue without referral - don't fail signup
         }
       }
 
@@ -359,7 +363,7 @@ export function SignupPage() {
 
       return { userId, phone: formattedPhone };
     },
-    onSuccess: ({ phone }) => {
+    onSuccess: ({ userId: _userId, phone }) => {  // FIXED: underscore prefix for unused param
       startMonitoring(phone);
     },
     onError: (error: any) => {
