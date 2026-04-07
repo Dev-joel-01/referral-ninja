@@ -448,6 +448,9 @@ Downloaded from Referral Ninja on ${format(new Date(), 'dd MMMM yyyy')}
                 <DialogTitle className="text-2xl font-heading text-ninja-mint">
                   {selectedContent.title}
                 </DialogTitle>
+                <DialogDescription className="text-ninja-sage">
+                  View the selected Mafullu content and download it for offline access.
+                </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-4">

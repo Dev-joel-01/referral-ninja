@@ -258,18 +258,23 @@ export function TaskManager() {
                         href={task.website_link}
                         target="_blank"
                         rel="noopener noreferrer"
+                        aria-label="Open task website"
                         className="p-2 rounded-lg bg-ninja-green/20 text-ninja-green hover:bg-ninja-green/30 transition-colors"
                       >
                         <ExternalLink className="w-4 h-4" />
                       </a>
                     )}
                     <button
+                      type="button"
+                      aria-label="Edit task"
                       onClick={() => openEditDialog(task)}
                       className="p-2 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
+                      type="button"
+                      aria-label="Delete task"
                       onClick={() => openDeleteDialog(task)}
                       className="p-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
                     >
@@ -344,6 +349,9 @@ export function TaskManager() {
             <DialogTitle className="text-2xl font-heading text-ninja-mint">
               Add New Task
             </DialogTitle>
+            <DialogDescription className="text-ninja-sage">
+              Fill out the fields below to create a new task listing.
+            </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -439,6 +447,9 @@ export function TaskManager() {
             <DialogTitle className="text-2xl font-heading text-ninja-mint">
               Edit Task
             </DialogTitle>
+            <DialogDescription className="text-ninja-sage">
+              Update the task details and save your changes.
+            </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit(onEdit)} className="space-y-4">

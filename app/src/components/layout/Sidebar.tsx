@@ -163,7 +163,11 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Mobile Sidebar */}
       <Sheet open={isOpen} onOpenChange={setIsOpen}>
         <SheetTrigger asChild>
-          <button className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-xl bg-ninja-dark/80 border border-ninja-green/20 text-ninja-mint">
+          <button
+            type="button"
+            aria-label="Open navigation menu"
+            className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-xl bg-ninja-dark/80 border border-ninja-green/20 text-ninja-mint"
+          >
             <Menu className="w-6 h-6" />
           </button>
         </SheetTrigger>

@@ -17,7 +17,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { queryKeys } from '@/lib/queryKeys';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import QRCode from 'qrcode';
 import { cn } from '@/lib/utils';
@@ -513,6 +513,9 @@ export function ReferralsPage() {
             <DialogTitle className="text-xl font-heading text-ninja-mint text-center">
               Your Referral QR Code
             </DialogTitle>
+            <DialogDescription className="text-center text-ninja-sage">
+              Scan or download this QR code to share your referral link with others.
+            </DialogDescription>
           </DialogHeader>
           
           <div className="flex flex-col items-center gap-4 py-4">

@@ -244,6 +244,8 @@ export function MafulluManager() {
                       </p>
                     </div>
                     <button
+                      type="button"
+                      aria-label="Delete content"
                       onClick={() => openDeleteDialog(content)}
                       className="p-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
                     >
