@@ -4,6 +4,7 @@ import { CursorGlow } from '@/components/layout/CursorGlow';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { DemoModeBanner } from '@/components/common/DemoModeBanner';
+import { PWAInstallPrompt } from '@/components/common/PWAInstallPrompt';
 
 // Public Pages
 import LandingPage from '@/pages/LandingPage';
@@ -243,6 +244,7 @@ function App() {
           />
         </Routes>
       </Router>
+      <PWAInstallPrompt />
       <Toaster 
         position="top-right"
         toastOptions={{
