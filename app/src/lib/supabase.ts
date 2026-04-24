@@ -13,13 +13,27 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 // Auth helpers
 export const signUp = async (email: string, password: string, metadata: Record<string, any>) => {
+  const cleanedMetadata = Object.fromEntries(
+    Object.entries(metadata).filter(([, value]) => value !== null && value !== undefined)
+  );
+
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      data: metadata,
+      data: cleanedMetadata,
+      emailRedirectTo: window.location.origin,
     },
   });
+
+  if (error) {
+    console.error('Supabase auth.signUp error', {
+      email,
+      metadata: cleanedMetadata,
+      error,
+    });
+  }
+
   return { data, error };
 };
 

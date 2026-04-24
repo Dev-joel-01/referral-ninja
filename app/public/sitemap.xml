@@ -4,7 +4,7 @@
   <!-- Homepage -->
   <url>
     <loc>https://www.referralninja.co.ke/</loc>
-    <lastmod>2026-04-04</lastmod>
+    <lastmod>2024-12-19</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
@@ -12,14 +12,14 @@
   <!-- Auth Pages -->
   <url>
     <loc>https://www.referralninja.co.ke/login</loc>
-    <lastmod>2026-04-03</lastmod>
+    <lastmod>2024-12-19</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   
   <url>
     <loc>https://www.referralninja.co.ke/signup</loc>
-    <lastmod>2026-04-03</lastmod>
+    <lastmod>2024-12-19</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
@@ -27,21 +27,21 @@
   <!-- Main App Pages -->
   <url>
     <loc>https://www.referralninja.co.ke/dashboard</loc>
-    <lastmod>2026-04-03</lastmod>
+    <lastmod>2024-12-19</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   
   <url>
     <loc>https://www.referralninja.co.ke/tasks</loc>
-    <lastmod>2026-04-03</lastmod>
+    <lastmod>2024-12-19</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.7</priority>
   </url>
   
   <url>
     <loc>https://www.referralninja.co.ke/referrals</loc>
-    <lastmod>2026-04-03</lastmod>
+    <lastmod>2024-12-19</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>

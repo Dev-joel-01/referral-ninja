@@ -1,13 +1,16 @@
 {
-  "name": "Referral Ninja",
-  "short_name": "RefNinja",
-  "description": "Turn referrals into income",
+  "name": "Referral Ninja - Turn Referrals Into Income",
+  "short_name": "Referral Ninja",
+  "description": "Refer friends, earn extra income. Pay KSh 200 once, get lifetime access to jobs & earn KSh 100 per referral. Withdraw when you reach KSh 500.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#050B06",
   "theme_color": "#39FF14",
+  "categories": ["business", "productivity", "finance"],
+  "lang": "en-KE",
+  "dir": "ltr",
   "icons": [
     {
       "src": "/icons/icon-192x192.svg",

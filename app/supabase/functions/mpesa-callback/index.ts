@@ -111,17 +111,8 @@ serve(async (req: Request) => {
         })
         .eq('id', payment.user_id);
 
-      // Complete referral if exists
-      if (payment.payment_type === 'registration') {
-        await supabase
-          .from('referrals')
-          .update({
-            status: 'completed',
-            earned_amount: 100,
-            completed_at: new Date().toISOString(),
-          })
-          .eq('referred_id', payment.user_id);
-      }
+      // Note: Referral completion is handled by the complete_referral trigger
+      // No need to manually update referrals here
     }
 
     return new Response(

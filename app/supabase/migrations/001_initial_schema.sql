@@ -347,10 +347,35 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
   referral_code TEXT;
+  base_username TEXT;
+  final_username TEXT;
+  counter INTEGER := 0;
 BEGIN
-  -- Generate unique referral code
-  referral_code := UPPER(SUBSTRING(MD5(RANDOM()::TEXT) FROM 1 FOR 8));
-  
+  -- Generate unique referral code with retry logic
+  LOOP
+    referral_code := UPPER(SUBSTRING(MD5(RANDOM()::TEXT || NOW()::TEXT) FROM 1 FOR 8));
+    EXIT WHEN NOT EXISTS (SELECT 1 FROM public.profiles WHERE referral_code = referral_code);
+    IF counter > 10 THEN
+      RAISE EXCEPTION 'Could not generate unique referral code after 10 attempts';
+    END IF;
+    counter := counter + 1;
+  END LOOP;
+
+  -- Generate unique username with retry logic
+  base_username := COALESCE(NEW.raw_user_meta_data->>'username', 'user_' || SUBSTRING(NEW.id::TEXT FROM 1 FOR 8));
+  final_username := base_username;
+  counter := 0;
+
+  LOOP
+    EXIT WHEN NOT EXISTS (SELECT 1 FROM public.profiles WHERE username = final_username);
+    counter := counter + 1;
+    final_username := base_username || '_' || counter;
+    IF counter > 100 THEN
+      RAISE EXCEPTION 'Could not generate unique username after 100 attempts';
+    END IF;
+  END LOOP;
+
+  -- Insert profile with validated data
   INSERT INTO public.profiles (
     id,
     legal_name,
@@ -359,20 +384,31 @@ BEGIN
     phone_number,
     referral_code,
     referred_by,
-    is_admin
+    is_admin,
+    payment_status
   )
   VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'legal_name', 'New User'),
-    COALESCE(NEW.raw_user_meta_data->>'username', 'user_' || SUBSTRING(NEW.id::TEXT FROM 1 FOR 8)),
+    COALESCE(NULLIF(TRIM(NEW.raw_user_meta_data->>'legal_name'), ''), 'New User'),
+    final_username,
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'phone_number', '254700000000'),
+    COALESCE(NULLIF(TRIM(NEW.raw_user_meta_data->>'phone_number'), ''), '254700000000'),
     referral_code,
-    NULLIF(NEW.raw_user_meta_data->>'referred_by', ''),
-    FALSE
+    CASE
+      WHEN NULLIF(TRIM(NEW.raw_user_meta_data->>'referred_by'), '') IS NOT NULL
+      THEN NULLIF(TRIM(NEW.raw_user_meta_data->>'referred_by'), '')::UUID
+      ELSE NULL
+    END,
+    FALSE,
+    'pending'
   );
-  
+
   RETURN NEW;
+EXCEPTION
+  WHEN OTHERS THEN
+    -- Log error and re-raise
+    RAISE WARNING 'Error in handle_new_user for user %: %', NEW.id, SQLERRM;
+    RAISE;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -381,6 +417,164 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
+
+-- RPC Function: Setup user profile (called after signup)
+CREATE OR REPLACE FUNCTION public.setup_user_profile(
+  p_user_id UUID,
+  p_legal_name TEXT,
+  p_username TEXT,
+  p_email TEXT,
+  p_phone_number TEXT,
+  p_referral_code TEXT,
+  p_referred_by TEXT DEFAULT NULL
+)
+RETURNS JSON AS $$
+DECLARE
+  result JSON;
+BEGIN
+  -- Update profile with additional data (already created by trigger)
+  UPDATE public.profiles
+  SET
+    legal_name = COALESCE(NULLIF(TRIM(p_legal_name), ''), legal_name),
+    username = COALESCE(NULLIF(TRIM(p_username), ''), username),
+    email = COALESCE(NULLIF(TRIM(p_email), ''), email),
+    phone_number = COALESCE(NULLIF(TRIM(p_phone_number), ''), phone_number),
+    referred_by = CASE
+      WHEN p_referred_by IS NOT NULL AND p_referred_by != ''
+      THEN p_referred_by::UUID
+      ELSE referred_by
+    END,
+    updated_at = NOW()
+  WHERE id = p_user_id;
+
+  -- Create referral record if referred_by is provided
+  IF p_referred_by IS NOT NULL AND p_referred_by != '' THEN
+    INSERT INTO public.referrals (referrer_id, referred_id, status)
+    VALUES (p_referred_by::UUID, p_user_id, 'pending')
+    ON CONFLICT (referred_id) DO NOTHING;
+  END IF;
+
+  result := json_build_object(
+    'success', true,
+    'message', 'Profile setup completed',
+    'user_id', p_user_id
+  );
+
+  RETURN result;
+EXCEPTION
+  WHEN OTHERS THEN
+    result := json_build_object(
+      'success', false,
+      'error', SQLERRM,
+      'user_id', p_user_id
+    );
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- RPC Function: Initiate registration payment
+CREATE OR REPLACE FUNCTION public.initiate_registration_payment(
+  p_user_id UUID,
+  p_phone_number TEXT
+)
+RETURNS JSON AS $$
+DECLARE
+  payment_id UUID;
+  result JSON;
+BEGIN
+  -- Validate phone number format
+  IF NOT (p_phone_number ~ '^254[0-9]{9}$') THEN
+    RETURN json_build_object(
+      'success', false,
+      'error', 'Invalid phone number format. Must be 254XXXXXXXXX'
+    );
+  END IF;
+
+  -- Check if user already has a pending/completed registration payment
+  IF EXISTS (
+    SELECT 1 FROM public.payments
+    WHERE user_id = p_user_id
+    AND payment_type = 'registration'
+    AND status IN ('pending', 'completed')
+  ) THEN
+    RETURN json_build_object(
+      'success', false,
+      'error', 'Registration payment already exists'
+    );
+  END IF;
+
+  -- Create payment record
+  INSERT INTO public.payments (
+    user_id,
+    payment_type,
+    amount,
+    status,
+    phone_number
+  )
+  VALUES (
+    p_user_id,
+    'registration',
+    200,
+    'pending',
+    p_phone_number
+  )
+  RETURNING id INTO payment_id;
+
+  result := json_build_object(
+    'success', true,
+    'payment_id', payment_id,
+    'amount', 200,
+    'message', 'Registration payment initiated'
+  );
+
+  RETURN result;
+EXCEPTION
+  WHEN OTHERS THEN
+    result := json_build_object(
+      'success', false,
+      'error', SQLERRM
+    );
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- RPC Function: Update user avatar
+CREATE OR REPLACE FUNCTION public.update_user_avatar(
+  p_user_id UUID,
+  p_avatar_url TEXT
+)
+RETURNS JSON AS $$
+DECLARE
+  result JSON;
+BEGIN
+  UPDATE public.profiles
+  SET
+    avatar_url = p_avatar_url,
+    updated_at = NOW()
+  WHERE id = p_user_id;
+
+  IF NOT FOUND THEN
+    RETURN json_build_object(
+      'success', false,
+      'error', 'User not found'
+    );
+  END IF;
+
+  result := json_build_object(
+    'success', true,
+    'message', 'Avatar updated successfully'
+  );
+
+  RETURN result;
+EXCEPTION
+  WHEN OTHERS THEN
+    result := json_build_object(
+      'success', false,
+      'error', SQLERRM
+    );
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================
 -- STORAGE BUCKETS

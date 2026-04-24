@@ -252,26 +252,37 @@ export function SignupPage() {
   const signupMutation = useMutation({
     mutationFn: async (data: SignupFormData) => {
       const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-      
+      const metadata = {
+        legal_name: data.legalName,
+        username: data.username,
+        phone_number: data.phoneNumber,
+        referral_code: referralCode,
+        referred_by: data.referralCode || null,
+      };
+
+      console.debug('Signup payload', {
+        email: data.email,
+        metadata,
+      });
+
       const { data: authData, error: authError } = await signUp(
         data.email,
         data.password,
-        {
-          legal_name: data.legalName,
-          username: data.username,
-          phone_number: data.phoneNumber,
-          referral_code: referralCode,
-          referred_by: data.referralCode || null,
-        }
+        metadata
       );
 
       if (authError || !authData.user) {
+        console.error('Supabase signup failed', {
+          authError,
+          authData,
+          metadata,
+        });
         throw authError || new Error('Failed to create user');
       }
 
       const userId = authData.user.id;
 
-      const { error: setupError } = await supabase.rpc('setup_user_profile', {
+      const { data: setupResult, error: setupError } = await supabase.rpc('setup_user_profile', {
         p_user_id: userId,
         p_legal_name: data.legalName,
         p_username: data.username,
@@ -282,15 +293,24 @@ export function SignupPage() {
       });
 
       if (setupError) throw setupError;
+      if (!setupResult?.success) {
+        throw new Error(setupResult?.error || 'Failed to setup user profile');
+      }
 
       if (avatarFile) {
         try {
           const avatarUrl = await uploadAvatar(userId, avatarFile);
           if (avatarUrl) {
-            await supabase.rpc('update_user_avatar', {
-              p_user_id: userId,
-              p_avatar_url: avatarUrl,
-            });
+          const { data: avatarResult, error: avatarError } = await supabase.rpc('update_user_avatar', {
+            p_user_id: userId,
+            p_avatar_url: avatarUrl,
+          });
+
+          if (avatarError) {
+            console.error('Avatar update error:', avatarError);
+          } else if (!avatarResult?.success) {
+            console.error('Avatar update failed:', avatarResult?.error);
+          }
           }
         } catch (avatarError) {
           console.error('Avatar upload error:', avatarError);
@@ -298,24 +318,9 @@ export function SignupPage() {
       }
 
       if (data.referralCode) {
-        try {
-          const { data: referrer } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('referral_code', data.referralCode)
-            .single();
-          
-          if (referrer) {
-            await supabase.from('referrals').insert({
-              referrer_id: referrer.id,
-              referred_id: userId,
-              status: 'pending',
-              earned_amount: 0,
-            });
-          }
-        } catch (referralError) {
-          console.error('Referral creation error:', referralError);
-        }
+        // Note: Referral creation is now handled by the handle_new_user trigger
+        // This block is kept for logging purposes only
+        console.log('Referral code provided:', data.referralCode);
       }
 
       return { userId, phoneNumber: data.phoneNumber };
@@ -326,7 +331,12 @@ export function SignupPage() {
       setShowPaymentDialog(true);
     },
     onError: (error: any) => {
-      alert(error.message || 'Failed to create account. Please try again.');
+      console.error('Signup mutation error', error);
+      const message =
+        error?.message ||
+        (typeof error === 'string' ? error : null) ||
+        'Failed to create account. Please try again.';
+      alert(message);
     },
   });
 
@@ -341,9 +351,6 @@ export function SignupPage() {
       );
 
       if (rpcError) throw rpcError;
-      
-      // FIX: Handle the actual response structure from your SQL function
-      // Your function returns { success: true, payment_id: "..." } or { success: false, error: "..." }
       if (!result?.success) {
         throw new Error(result?.error || 'Failed to create payment record');
       }
