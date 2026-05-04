@@ -200,7 +200,9 @@ export function PaymentsPage() {
           template: 'withdrawal-verification',
           data: { code, amount: data.amount },
         },
-      }).catch(console.error);
+      }).catch(() => {
+        // Data URL conversion failed
+      });
 
       setPendingWithdrawal({ ...data, codeId: codeData.id });
       setShowWithdrawDialog(false);

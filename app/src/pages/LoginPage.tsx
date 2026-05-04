@@ -49,7 +49,6 @@ export function LoginPage() {
         navigate(from, { replace: true });
       }
     } catch (error: any) {
-      console.error('Login error:', error);
       setLoginError(error.message || 'Invalid email or password');
     } finally {
       setIsSubmitting(false);

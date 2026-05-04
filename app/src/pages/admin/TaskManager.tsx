@@ -63,7 +63,7 @@ export function TaskManager() {
       if (error) throw error;
       setTasks(data || []);
     } catch (error) {
-      console.error('Error fetching tasks:', error);
+      // Error fetching tasks - will show empty state
     }
   }, []);
 
@@ -104,7 +104,7 @@ export function TaskManager() {
         .upload(fileName, image);
       
       if (uploadError) {
-        console.error('Upload error:', uploadError);
+        // Skip this image if upload fails
         continue;
       }
       
@@ -141,7 +141,7 @@ export function TaskManager() {
       setImagePreviews([]);
       fetchTasks();
     } catch (error) {
-      console.error('Error creating task:', error);
+      // Error creating task
     } finally {
       setIsSubmitting(false);
     }
@@ -170,7 +170,7 @@ export function TaskManager() {
       reset();
       fetchTasks();
     } catch (error) {
-      console.error('Error updating task:', error);
+      // Error updating task
     } finally {
       setIsSubmitting(false);
     }
@@ -191,7 +191,7 @@ export function TaskManager() {
       setSelectedTask(null);
       fetchTasks();
     } catch (error) {
-      console.error('Error deleting task:', error);
+      // Error deleting task
     }
   };
 

@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { supabase, signUp, uploadAvatar } from '@/lib/supabase';
+import { supabase, signUp, signIn, uploadAvatar } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
@@ -81,14 +81,15 @@ const usePaymentMonitoring = (
         .eq('payment_type', 'registration')
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (error) {
-        console.error('Payment check error:', error);
         return false;
       }
 
-      console.log('Payment status check:', payment?.status);
+      if (!payment) {
+        return false;
+      }
 
       if (payment?.status === 'completed') {
         cleanup();
@@ -107,7 +108,6 @@ const usePaymentMonitoring = (
 
       return false;
     } catch (error) {
-      console.error('Payment check error:', error);
       return false;
     }
   }, [userId, cleanup, onSuccess, onFailure]);
@@ -132,7 +132,6 @@ const usePaymentMonitoring = (
           filter: `user_id=eq.${userId}`,
         },
         (payload) => {
-          console.log('Realtime payment update:', payload.new.status);
           if (payload.new.status === 'completed') {
             cleanup();
             setStatus('success');
@@ -145,8 +144,7 @@ const usePaymentMonitoring = (
           }
         }
       )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
+      .subscribe(() => {
       });
 
     let attempts = 0;
@@ -238,13 +236,10 @@ export function SignupPage() {
   } = usePaymentMonitoring(
     createdUserId,
     () => {
-      console.log('✅ Payment success - initiating redirect...');
       queryClient.invalidateQueries({ queryKey: ['user'] });
       setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
     },
-    (msg) => {
-      console.log('❌ Payment failed:', msg);
-    }
+    () => {}
   );
 
   useEffect(() => cleanupPayment, [cleanupPayment]);
@@ -260,11 +255,6 @@ export function SignupPage() {
         referred_by: data.referralCode || null,
       };
 
-      console.debug('Signup payload', {
-        email: data.email,
-        metadata,
-      });
-
       const { data: authData, error: authError } = await signUp(
         data.email,
         data.password,
@@ -272,11 +262,6 @@ export function SignupPage() {
       );
 
       if (authError || !authData.user) {
-        console.error('Supabase signup failed', {
-          authError,
-          authData,
-          metadata,
-        });
         throw authError || new Error('Failed to create user');
       }
 
@@ -307,20 +292,24 @@ export function SignupPage() {
           });
 
           if (avatarError) {
-            console.error('Avatar update error:', avatarError);
+            // Silently fail avatar update
           } else if (!avatarResult?.success) {
-            console.error('Avatar update failed:', avatarResult?.error);
+            // Avatar update returned error
           }
           }
         } catch (avatarError) {
-          console.error('Avatar upload error:', avatarError);
+          // Avatar upload failed, continue with signup
         }
       }
 
       if (data.referralCode) {
         // Note: Referral creation is now handled by the handle_new_user trigger
-        // This block is kept for logging purposes only
-        console.log('Referral code provided:', data.referralCode);
+      }
+
+      // Sign the user in immediately after signup
+      const { error: signInError } = await signIn(data.email, data.password);
+      if (signInError) {
+        throw signInError;
       }
 
       return { userId, phoneNumber: data.phoneNumber };
@@ -331,7 +320,6 @@ export function SignupPage() {
       setShowPaymentDialog(true);
     },
     onError: (error: any) => {
-      console.error('Signup mutation error', error);
       const message =
         error?.message ||
         (typeof error === 'string' ? error : null) ||

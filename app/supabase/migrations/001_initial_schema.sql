@@ -152,17 +152,26 @@ CREATE POLICY "Users can update own profile"
   ON public.profiles FOR UPDATE
   USING (auth.uid() = id);
 
+-- Admin helper: checks the current user's admin flag without triggering policy recursion
+CREATE OR REPLACE FUNCTION public.is_admin_user(p_user_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+  result BOOLEAN;
+BEGIN
+  SELECT is_admin INTO result
+  FROM public.profiles
+  WHERE id = p_user_id;
+  RETURN COALESCE(result, FALSE);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 CREATE POLICY "Admins can view all profiles"
   ON public.profiles FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 CREATE POLICY "Admins can update all profiles"
   ON public.profiles FOR UPDATE
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 -- Tasks policies
 CREATE POLICY "Anyone can view active tasks"
@@ -171,9 +180,7 @@ CREATE POLICY "Anyone can view active tasks"
 
 CREATE POLICY "Admins can manage tasks"
   ON public.tasks FOR ALL
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 -- Task clicks policies
 CREATE POLICY "Users can view own task clicks"
@@ -186,16 +193,12 @@ CREATE POLICY "Users can create own task clicks"
 
 CREATE POLICY "Admins can view all task clicks"
   ON public.task_clicks FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 -- Mafullu content policies
 CREATE POLICY "Admins can manage mafullu content"
   ON public.mafullu_content FOR ALL
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 CREATE POLICY "Users can view purchased mafullu content"
   ON public.mafullu_content FOR SELECT
@@ -212,9 +215,7 @@ CREATE POLICY "Users can create own purchases"
 
 CREATE POLICY "Admins can view all purchases"
   ON public.mafullu_purchases FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 -- Referrals policies
 CREATE POLICY "Users can view own referrals"
@@ -223,9 +224,7 @@ CREATE POLICY "Users can view own referrals"
 
 CREATE POLICY "Admins can view all referrals"
   ON public.referrals FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 -- Payments policies
 CREATE POLICY "Users can view own payments"
@@ -238,15 +237,11 @@ CREATE POLICY "Users can create own payments"
 
 CREATE POLICY "Admins can view all payments"
   ON public.payments FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 CREATE POLICY "Admins can update payments"
   ON public.payments FOR UPDATE
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 -- Withdrawals policies
 CREATE POLICY "Users can view own withdrawals"
@@ -259,15 +254,11 @@ CREATE POLICY "Users can create own withdrawals"
 
 CREATE POLICY "Admins can view all withdrawals"
   ON public.withdrawals FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 CREATE POLICY "Admins can update withdrawals"
   ON public.withdrawals FOR UPDATE
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 -- Password resets policies
 CREATE POLICY "Users can view own password resets"
@@ -285,15 +276,43 @@ CREATE POLICY "Users can update own password resets"
 -- Admin logs policies
 CREATE POLICY "Admins can view all admin logs"
   ON public.admin_logs FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  USING (public.is_admin_user(auth.uid()));
 
 CREATE POLICY "Admins can create admin logs"
   ON public.admin_logs FOR INSERT
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = TRUE
-  ));
+  WITH CHECK (public.is_admin_user(auth.uid()));
+
+-- ============================================
+-- VIEWS
+-- ============================================
+
+-- View for user statistics (used in Dashboard, Referrals, Admin pages)
+CREATE OR REPLACE VIEW public.user_stats_view AS
+SELECT 
+  p.id,
+  p.username,
+  p.email,
+  p.avatar_url,
+  p.payment_status,
+  p.joined_at,
+  COUNT(DISTINCT r.id) as referral_count,
+  COALESCE(SUM(r.earned_amount), 0) as total_earned,
+  COUNT(DISTINCT tc.id) as task_clicks_count
+FROM public.profiles p
+LEFT JOIN public.referrals r ON p.id = r.referrer_id AND r.status = 'completed'
+LEFT JOIN public.task_clicks tc ON p.id = tc.user_id
+GROUP BY p.id, p.username, p.email, p.avatar_url, p.payment_status, p.joined_at;
+
+-- Enable RLS on the view
+ALTER TABLE public.user_stats_view ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own stats"
+  ON public.user_stats_view FOR SELECT
+  USING (auth.uid() = id);
+
+CREATE POLICY "Admins can view all stats"
+  ON public.user_stats_view FOR SELECT
+  USING (public.is_admin_user(auth.uid()));
 
 -- ============================================
 -- FUNCTIONS AND TRIGGERS
@@ -323,7 +342,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION public.complete_referral()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.payment_status = 'completed' AND OLD.payment_status = 'pending' THEN
+  IF NEW.status = 'completed' AND OLD.status = 'pending' THEN
     UPDATE public.referrals
     SET 
       status = 'completed',

@@ -130,8 +130,7 @@ export function MafulluPage() {
       });
 
       if (mpesaError) {
-        console.error('M-Pesa error:', mpesaError);
-        // Don't throw - M-Pesa might still work via callback
+        // M-Pesa error occurred but payment might still complete via callback
       }
 
       setPurchaseStatus('polling');

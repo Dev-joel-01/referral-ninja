@@ -67,7 +67,7 @@ export function MafulluManager() {
       if (error) throw error;
       setContents(data || []);
     } catch (error) {
-      console.error('Error fetching mafullu content:', error);
+      // Error fetching mafullu content - will show empty state
     }
   }, []);
 
@@ -108,7 +108,7 @@ export function MafulluManager() {
         .upload(fileName, image);
       
       if (uploadError) {
-        console.error('Upload error:', uploadError);
+        // Skip this image if upload fails
         continue;
       }
       
@@ -143,7 +143,7 @@ export function MafulluManager() {
       setImagePreviews([]);
       fetchContents();
     } catch (error) {
-      console.error('Error creating mafullu content:', error);
+      // Error creating mafullu content
     } finally {
       setIsSubmitting(false);
     }
@@ -164,7 +164,7 @@ export function MafulluManager() {
       setSelectedContent(null);
       fetchContents();
     } catch (error) {
-      console.error('Error deleting mafullu content:', error);
+      // Error deleting mafullu content
     }
   };
 

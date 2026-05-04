@@ -100,8 +100,7 @@ export function ForgotPasswordPage() {
       });
 
       if (emailError) {
-        console.error('Email error:', emailError);
-        // Continue anyway - code is stored
+        // Email notification failed, but code is still valid
       }
 
       setEmail(data.email);

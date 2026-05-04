@@ -5,6 +5,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { DemoModeBanner } from '@/components/common/DemoModeBanner';
 import { PWAInstallPrompt } from '@/components/common/PWAInstallPrompt';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 // Public Pages
 import LandingPage from '@/pages/LandingPage';
@@ -61,201 +62,203 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <>
-      <Router>
-        <Routes>
-          {/* Public Landing Page */}
-          <Route 
-            path="/" 
-            element={
-              <PublicLayout>
-                <LandingPage />
-              </PublicLayout>
-            } 
-          />
+    <ErrorBoundary>
+      <>
+        <Router>
+          <Routes>
+            {/* Public Landing Page */}
+            <Route 
+              path="/" 
+              element={
+                <PublicLayout>
+                  <LandingPage />
+                </PublicLayout>
+              } 
+            />
 
-          {/* Public Auth Routes - WRAPPED IN PublicLayout */}
-          <Route 
-            path="/signup" 
-            element={
-              <PublicLayout>
-                <SignupPage />
-              </PublicLayout>
-            } 
-          />
-          <Route 
-            path="/login" 
-            element={
-              <PublicLayout>
-                <LoginPage />
-              </PublicLayout>
-            } 
-          />
-          <Route 
-            path="/forgot-password" 
-            element={
-              <PublicLayout>
-                <ForgotPasswordPage />
-              </PublicLayout>
-            } 
-          />
-          
-          {/* Protected User Routes */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <AuthenticatedLayout>
-                  <DashboardPage />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute>
-                <AuthenticatedLayout>
-                  <ProfilePage />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/tasks"
-            element={
-              <ProtectedRoute>
-                <AuthenticatedLayout>
-                  <TaskZonePage />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/referrals"
-            element={
-              <ProtectedRoute>
-                <AuthenticatedLayout>
-                  <ReferralsPage />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/payments"
-            element={
-              <ProtectedRoute>
-                <AuthenticatedLayout>
-                  <PaymentsPage />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <AuthenticatedLayout>
-                  <SettingsPage />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/mafullu"
-            element={
-              <ProtectedRoute>
-                <AuthenticatedLayout>
-                  <MafulluPage />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
+            {/* Public Auth Routes - WRAPPED IN PublicLayout */}
+            <Route 
+              path="/signup" 
+              element={
+                <PublicLayout>
+                  <SignupPage />
+                </PublicLayout>
+              } 
+            />
+            <Route 
+              path="/login" 
+              element={
+                <PublicLayout>
+                  <LoginPage />
+                </PublicLayout>
+              } 
+            />
+            <Route 
+              path="/forgot-password" 
+              element={
+                <PublicLayout>
+                  <ForgotPasswordPage />
+                </PublicLayout>
+              } 
+            />
+            
+            {/* Protected User Routes */}
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <AuthenticatedLayout>
+                    <DashboardPage />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <AuthenticatedLayout>
+                    <ProfilePage />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/tasks"
+              element={
+                <ProtectedRoute>
+                  <AuthenticatedLayout>
+                    <TaskZonePage />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/referrals"
+              element={
+                <ProtectedRoute>
+                  <AuthenticatedLayout>
+                    <ReferralsPage />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/payments"
+              element={
+                <ProtectedRoute>
+                  <AuthenticatedLayout>
+                    <PaymentsPage />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <AuthenticatedLayout>
+                    <SettingsPage />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/mafullu"
+              element={
+                <ProtectedRoute>
+                  <AuthenticatedLayout>
+                    <MafulluPage />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
 
-          {/* Protected Admin Routes */}
-          <Route
-            path="/admin"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AuthenticatedLayout>
-                  <AdminDashboard />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/tasks"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AuthenticatedLayout>
-                  <TaskManager />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/users"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AuthenticatedLayout>
-                  <UserManager />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/payments"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AuthenticatedLayout>
-                  <PaymentManager />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/mafullu"
-            element={
-              <ProtectedRoute requireAdmin>
-                <AuthenticatedLayout>
-                  <MafulluManager />
-                </AuthenticatedLayout>
-              </ProtectedRoute>
-            }
-          />
+            {/* Protected Admin Routes */}
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute requireAdmin>
+                  <AuthenticatedLayout>
+                    <AdminDashboard />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/tasks"
+              element={
+                <ProtectedRoute requireAdmin>
+                  <AuthenticatedLayout>
+                    <TaskManager />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <ProtectedRoute requireAdmin>
+                  <AuthenticatedLayout>
+                    <UserManager />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/payments"
+              element={
+                <ProtectedRoute requireAdmin>
+                  <AuthenticatedLayout>
+                    <PaymentManager />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/mafullu"
+              element={
+                <ProtectedRoute requireAdmin>
+                  <AuthenticatedLayout>
+                    <MafulluManager />
+                  </AuthenticatedLayout>
+                </ProtectedRoute>
+              }
+            />
 
-          {/* 404 - Show Not Found Page Instead of Auto-Redirect */}
-          <Route 
-            path="*" 
-            element={
-              <PublicLayout>
-                <div className="min-h-screen flex flex-col items-center justify-center text-ninja-mint p-4">
-                  <h1 className="text-4xl font-bold mb-4">404</h1>
-                  <p className="text-ninja-sage mb-6">Page not found</p>
-                  <a 
-                    href="/" 
-                    className="text-ninja-green hover:underline"
-                  >
-                    Go back home
-                  </a>
-                </div>
-              </PublicLayout>
-            } 
-          />
-        </Routes>
-      </Router>
-      <PWAInstallPrompt />
-      <Toaster 
-        position="top-right"
-        toastOptions={{
-          style: {
-            background: '#0A1A0D',
-            border: '1px solid rgba(57, 255, 20, 0.2)',
-            color: '#E8FFE8',
-          },
-        }}
-      />
-    </>
+            {/* 404 - Show Not Found Page Instead of Auto-Redirect */}
+            <Route 
+              path="*" 
+              element={
+                <PublicLayout>
+                  <div className="min-h-screen flex flex-col items-center justify-center text-ninja-mint p-4">
+                    <h1 className="text-4xl font-bold mb-4">404</h1>
+                    <p className="text-ninja-sage mb-6">Page not found</p>
+                    <a 
+                      href="/" 
+                      className="text-ninja-green hover:underline"
+                    >
+                      Go back home
+                    </a>
+                  </div>
+                </PublicLayout>
+              } 
+            />
+          </Routes>
+        </Router>
+        <PWAInstallPrompt />
+        <Toaster 
+          position="top-right"
+          toastOptions={{
+            style: {
+              background: '#0A1A0D',
+              border: '1px solid rgba(57, 255, 20, 0.2)',
+              color: '#E8FFE8',
+            },
+          }}
+        />
+      </>
+    </ErrorBoundary>
   );
 }
 

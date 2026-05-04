@@ -145,7 +145,9 @@ export function ReferralsPage() {
         width: 400,
         margin: 2,
         color: { dark: '#39FF14', light: '#050B06' },
-      }).then(setQrCodeUrl).catch(console.error);
+      }).then(setQrCodeUrl).catch(() => {
+        // QR code generation failed
+      });
     }
   }, [showQRDialog, referralLink, qrCodeUrl]);
 
