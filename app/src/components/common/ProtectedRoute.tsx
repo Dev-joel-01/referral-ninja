@@ -8,7 +8,7 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, isAdmin } = useAuth();
+  const { isAuthenticated, isLoading, isAdmin, user } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -24,6 +24,16 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Check if payment is verified for accessing protected features
+  // Note: Users with pending payment are still authenticated but can't access task-related features
+  if (user && user.payment_status !== 'completed' && location.pathname !== '/dashboard') {
+    // Allow access to dashboard and payment pages, but redirect elsewhere to dashboard if payment not complete
+    if (location.pathname.startsWith('/payments') || location.pathname === '/dashboard') {
+      return <>{children}</>;
+    }
+    return <Navigate to="/dashboard" replace />;
   }
 
   if (requireAdmin && !isAdmin) {

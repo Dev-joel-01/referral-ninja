@@ -412,7 +412,7 @@ export default function LandingPage() {
             </Button>
           </GlassCard>
           <p className="mt-6 text-sm text-[#9AB89A]">
-            Questions? Email support@referralninja.co.ke
+            Questions? Email <a href="mailto:williamschelea628@gmail.com" className="hover:text-[#39FF14]">support@referralninja.co.ke</a>
           </p>
         </div>
       </section>
@@ -436,9 +436,11 @@ export default function LandingPage() {
               </ul>
             </div>
             <div>
-              <h4 className="font-semibold mb-4">Contact</h4>
+              <h4 className="font-semibold mb-4">Contact & Support</h4>
               <ul className="space-y-2 text-sm text-[#9AB89A]">
-                <li>support@referralninja.co.ke</li>
+                <li><a href="mailto:williamschelea628@gmail.com" className="hover:text-[#39FF14]">support@referralninja.co.ke</a></li>
+                <li><a href="https://t.me/referrninjaadmin" target="_blank" rel="noopener noreferrer" className="hover:text-[#39FF14]">Telegram Support</a></li>
+                <li><a href="https://t.me/+zMgnUgtTwm5mZWVk" target="_blank" rel="noopener noreferrer" className="hover:text-[#39FF14]">Updates Group</a></li>
                 <li>Nairobi, Kenya</li>
               </ul>
             </div>

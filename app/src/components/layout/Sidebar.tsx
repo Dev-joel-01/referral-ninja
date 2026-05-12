@@ -10,6 +10,8 @@ import {
   Shield,
   Menu,
   FileText,        // ← added for Mafullu
+  MessageCircle,
+  HelpCircle,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
@@ -134,6 +136,28 @@ export function Sidebar({ className }: SidebarProps) {
           );
         })}
       </nav>
+
+      {/* Support Links */}
+      <div className="p-4 border-t border-ninja-green/10 space-y-2">
+        <a
+          href="https://t.me/referrninjaadmin"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 px-4 py-3 rounded-xl text-ninja-sage hover:text-ninja-mint hover:bg-ninja-green/10 transition-all duration-300"
+        >
+          <HelpCircle className="w-5 h-5" />
+          <span className="font-medium">Telegram Support</span>
+        </a>
+        <a
+          href="https://t.me/+zMgnUgtTwm5mZWVk"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 px-4 py-3 rounded-xl text-ninja-sage hover:text-ninja-mint hover:bg-ninja-green/10 transition-all duration-300"
+        >
+          <MessageCircle className="w-5 h-5" />
+          <span className="font-medium">Updates Group</span>
+        </a>
+      </div>
 
       {/* Logout */}
       <div className="p-4 border-t border-ninja-green/10">

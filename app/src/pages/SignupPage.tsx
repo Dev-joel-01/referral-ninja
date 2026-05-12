@@ -118,7 +118,7 @@ const usePaymentMonitoring = (
     
     setStatus('verifying');
     setMessage('Please check your phone and enter M-Pesa PIN to complete payment...');
-    setRemainingAttempts(10);
+    setRemainingAttempts(40);
     setIsManualCheck(false);
 
     channelRef.current = supabase
@@ -148,7 +148,8 @@ const usePaymentMonitoring = (
       });
 
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 40; // Increased from 10 to 40 (2+ minutes instead of 30 seconds)
+    const checkInterval = 2000; // Check every 2 seconds for faster detection
 
     const checkPayment = async () => {
       attempts++;
@@ -163,8 +164,10 @@ const usePaymentMonitoring = (
       return shouldStop;
     };
 
+    // Perform initial check immediately
     checkPayment().then(shouldStop => {
       if (!shouldStop) {
+        // Continue checking at regular intervals if not successful
         intervalRef.current = setInterval(() => {
           checkPayment().then(stop => {
             if (stop && intervalRef.current) {
@@ -172,7 +175,7 @@ const usePaymentMonitoring = (
               intervalRef.current = null;
             }
           });
-        }, 3000);
+        }, checkInterval);
       }
     });
   }, [userId, cleanup, onSuccess, onFailure, checkPaymentStatus]);
@@ -236,8 +239,10 @@ export function SignupPage() {
   } = usePaymentMonitoring(
     createdUserId,
     () => {
+      // Invalidate user query to refresh auth state
       queryClient.invalidateQueries({ queryKey: ['user'] });
-      setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
+      // Give a brief moment for auth state to update, then redirect
+      setTimeout(() => navigate('/dashboard', { replace: true }), 800);
     },
     () => {}
   );
@@ -422,9 +427,25 @@ export function SignupPage() {
 
   const handleManualCheck = async () => {
     setIsManualCheck(true);
-    const isComplete = await checkPaymentStatus();
+    
+    // Perform multiple checks with small delays to ensure we catch the payment
+    let isComplete = false;
+    
+    // Try up to 5 times with 500ms between checks for manual verification
+    for (let i = 0; i < 5; i++) {
+      const result = await checkPaymentStatus();
+      if (result) {
+        isComplete = true;
+        break;
+      }
+      // Wait 500ms before next check (except after the last attempt)
+      if (i < 4) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
     if (!isComplete) {
-      alert('Payment still pending. If you completed the M-Pesa payment on your phone, please wait 1-2 minutes and try again, or contact support.');
+      alert('Payment still pending. If you completed the M-Pesa payment on your phone, please wait a moment and try again, or contact support via Telegram.');
     }
     setIsManualCheck(false);
   };

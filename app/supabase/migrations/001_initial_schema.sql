@@ -303,16 +303,8 @@ LEFT JOIN public.referrals r ON p.id = r.referrer_id AND r.status = 'completed'
 LEFT JOIN public.task_clicks tc ON p.id = tc.user_id
 GROUP BY p.id, p.username, p.email, p.avatar_url, p.payment_status, p.joined_at;
 
--- Enable RLS on the view
-ALTER TABLE public.user_stats_view ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own stats"
-  ON public.user_stats_view FOR SELECT
-  USING (auth.uid() = id);
-
-CREATE POLICY "Admins can view all stats"
-  ON public.user_stats_view FOR SELECT
-  USING (public.is_admin_user(auth.uid()));
+-- Note: RLS policies on underlying tables (profiles, referrals, task_clicks) 
+-- will automatically apply when querying through this view
 
 -- ============================================
 -- FUNCTIONS AND TRIGGERS
@@ -413,11 +405,12 @@ BEGIN
     NEW.email,
     COALESCE(NULLIF(TRIM(NEW.raw_user_meta_data->>'phone_number'), ''), '254700000000'),
     referral_code,
-    CASE
-      WHEN NULLIF(TRIM(NEW.raw_user_meta_data->>'referred_by'), '') IS NOT NULL
-      THEN NULLIF(TRIM(NEW.raw_user_meta_data->>'referred_by'), '')::UUID
-      ELSE NULL
-    END,
+    (
+      SELECT id
+      FROM public.profiles
+      WHERE referral_code = NULLIF(TRIM(NEW.raw_user_meta_data->>'referred_by'), '')
+      LIMIT 1
+    ),
     FALSE,
     'pending'
   );
@@ -450,7 +443,24 @@ CREATE OR REPLACE FUNCTION public.setup_user_profile(
 RETURNS JSON AS $$
 DECLARE
   result JSON;
+  referrer_id UUID;
 BEGIN
+  -- Resolve referral code to referrer UUID if needed
+  IF p_referred_by IS NOT NULL AND p_referred_by != '' THEN
+    SELECT id INTO referrer_id
+    FROM public.profiles
+    WHERE referral_code = p_referred_by
+    LIMIT 1;
+
+    IF referrer_id IS NULL THEN
+      BEGIN
+        referrer_id := p_referred_by::UUID;
+      EXCEPTION WHEN invalid_text_representation THEN
+        referrer_id := NULL;
+      END;
+    END IF;
+  END IF;
+
   -- Update profile with additional data (already created by trigger)
   UPDATE public.profiles
   SET
@@ -458,18 +468,14 @@ BEGIN
     username = COALESCE(NULLIF(TRIM(p_username), ''), username),
     email = COALESCE(NULLIF(TRIM(p_email), ''), email),
     phone_number = COALESCE(NULLIF(TRIM(p_phone_number), ''), phone_number),
-    referred_by = CASE
-      WHEN p_referred_by IS NOT NULL AND p_referred_by != ''
-      THEN p_referred_by::UUID
-      ELSE referred_by
-    END,
+    referred_by = COALESCE(referrer_id, referred_by),
     updated_at = NOW()
   WHERE id = p_user_id;
 
   -- Create referral record if referred_by is provided
-  IF p_referred_by IS NOT NULL AND p_referred_by != '' THEN
+  IF referrer_id IS NOT NULL THEN
     INSERT INTO public.referrals (referrer_id, referred_id, status)
-    VALUES (p_referred_by::UUID, p_user_id, 'pending')
+    VALUES (referrer_id, p_user_id, 'pending')
     ON CONFLICT (referred_id) DO NOTHING;
   END IF;
 
