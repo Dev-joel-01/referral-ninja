@@ -26,9 +26,12 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Check if payment is verified for accessing protected features
-  // Note: Users with pending payment are still authenticated but can't access task-related features
-  if (user && user.payment_status !== 'completed' && location.pathname !== '/dashboard') {
+  if (requireAdmin && !isAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // Admins may bypass the payment-status restriction for admin pages
+  if (user && user.payment_status !== 'completed' && !isAdmin && location.pathname !== '/dashboard') {
     // Allow access to dashboard and payment pages, but redirect elsewhere to dashboard if payment not complete
     if (location.pathname.startsWith('/payments') || location.pathname === '/dashboard') {
       return <>{children}</>;
@@ -36,9 +39,4 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
     return <Navigate to="/dashboard" replace />;
   }
 
-  if (requireAdmin && !isAdmin) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
-  return <>{children}</>;
-}
+  return <>{children}</>;}
