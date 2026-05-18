@@ -272,6 +272,12 @@ export function SignupPage() {
 
       const userId = authData.user.id;
 
+      // Ensure the new user session exists before calling auth-protected RPCs.
+      const { error: signInError } = await signIn(data.email, data.password);
+      if (signInError) {
+        throw signInError;
+      }
+
       const { data: setupResult, error: setupError } = await supabase.rpc('setup_user_profile', {
         p_user_id: userId,
         p_legal_name: data.legalName,
@@ -309,12 +315,6 @@ export function SignupPage() {
 
       if (data.referralCode) {
         // Note: Referral creation is now handled by the handle_new_user trigger
-      }
-
-      // Sign the user in immediately after signup
-      const { error: signInError } = await signIn(data.email, data.password);
-      if (signInError) {
-        throw signInError;
       }
 
       return { userId, phoneNumber: data.phoneNumber };
