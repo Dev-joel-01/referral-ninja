@@ -207,6 +207,15 @@ export function SignupPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
+  const [createdUserData, setCreatedUserData] = useState<{
+    userId: string;
+    email: string;
+    password: string;
+    legalName: string;
+    username: string;
+    phoneNumber: string;
+    referralCode?: string | null;
+  } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -238,13 +247,80 @@ export function SignupPage() {
     setIsManualCheck
   } = usePaymentMonitoring(
     createdUserId,
-    () => {
-      // Invalidate user query to refresh auth state
-      queryClient.invalidateQueries({ queryKey: ['user'] });
-      // Give a brief moment for auth state to update, then redirect
-      setTimeout(() => navigate('/dashboard', { replace: true }), 800);
+    async () => {
+      // When payment is verified, sign the user in and run profile setup + avatar update
+      if (!createdUserData) return;
+
+      try {
+        const { email, password, userId, legalName, username, phoneNumber, referralCode } = createdUserData;
+
+        // Sign in to create a session for RPCs that require auth
+        const { error: signInError } = await signIn(email, password);
+        if (signInError) {
+          alert('Payment verified but failed to sign in. Please try logging in.');
+          return;
+        }
+
+        // Run server-side profile setup
+        const { data: setupResult, error: setupError } = await supabase.rpc('setup_user_profile', {
+          p_user_id: userId,
+          p_legal_name: legalName,
+          p_username: username,
+          p_email: email,
+          p_phone_number: phoneNumber,
+          p_referral_code: referralCode || null,
+          p_referred_by: createdUserData.referralCode || null,
+        });
+
+        if (setupError) {
+          console.error('setup_user_profile error', setupError);
+          alert('Payment verified but failed to complete account setup. Please contact support.');
+          return;
+        }
+
+        if (!setupResult?.success) {
+          console.error('setup_user_profile returned error', setupResult);
+          alert(setupResult?.error || 'Failed to complete account setup.');
+          return;
+        }
+
+        // Clear pending flag on auth user metadata now that setup completed
+        try {
+          await supabase.auth.updateUser({ data: { pending_registration: null } });
+        } catch (e) {
+          console.warn('Failed to clear pending_registration flag', e);
+        }
+
+        // Upload avatar if provided
+        if (avatarFile) {
+          try {
+            const avatarUrl = await uploadAvatar(userId, avatarFile);
+              if (avatarUrl) {
+                const { error: avatarError } = await supabase.rpc('update_user_avatar', {
+                  p_user_id: userId,
+                  p_avatar_url: avatarUrl,
+                });
+
+                if (avatarError) {
+                  console.warn('Failed to update avatar via RPC', avatarError);
+                }
+              }
+          } catch (e) {
+            console.warn('Avatar upload failed', e);
+          }
+        }
+
+        // Refresh auth/user state and navigate to dashboard
+        queryClient.invalidateQueries({ queryKey: ['user'] });
+        setTimeout(() => navigate('/dashboard', { replace: true }), 800);
+      } catch (err) {
+        console.error(err);
+      }
     },
-    () => {}
+    (msg: string) => {
+      // propagate payment failures to UI
+      alert(msg);
+    }
   );
 
   useEffect(() => cleanupPayment, [cleanupPayment]);
@@ -258,70 +334,40 @@ export function SignupPage() {
         phone_number: data.phoneNumber,
         referral_code: referralCode,
         referred_by: data.referralCode || null,
+        // Mark this auth user as pending until payment is confirmed
+        pending_registration: true,
       };
 
+      // Create the auth user but DO NOT run profile setup until payment is verified.
       const { data: authData, error: authError } = await signUp(
         data.email,
         data.password,
         metadata
       );
 
-      if (authError || !authData.user) {
+      if (authError || !authData?.user) {
         throw authError || new Error('Failed to create user');
       }
 
       const userId = authData.user.id;
 
-      // Ensure the new user session exists before calling auth-protected RPCs.
-      const { error: signInError } = await signIn(data.email, data.password);
-      if (signInError) {
-        throw signInError;
-      }
-
-      const { data: setupResult, error: setupError } = await supabase.rpc('setup_user_profile', {
-        p_user_id: userId,
-        p_legal_name: data.legalName,
-        p_username: data.username,
-        p_email: data.email,
-        p_phone_number: data.phoneNumber,
-        p_referral_code: referralCode,
-        p_referred_by: data.referralCode || null,
+      // Store created user credentials locally so we can finish setup after payment
+      setCreatedUserData({
+        userId,
+        email: data.email,
+        password: data.password,
+        legalName: data.legalName,
+        username: data.username,
+        phoneNumber: data.phoneNumber,
+        referralCode: referralCode,
       });
 
-      if (setupError) throw setupError;
-      if (!setupResult?.success) {
-        throw new Error(setupResult?.error || 'Failed to setup user profile');
-      }
-
-      if (avatarFile) {
-        try {
-          const avatarUrl = await uploadAvatar(userId, avatarFile);
-          if (avatarUrl) {
-          const { data: avatarResult, error: avatarError } = await supabase.rpc('update_user_avatar', {
-            p_user_id: userId,
-            p_avatar_url: avatarUrl,
-          });
-
-          if (avatarError) {
-            // Silently fail avatar update
-          } else if (!avatarResult?.success) {
-            // Avatar update returned error
-          }
-          }
-        } catch (avatarError) {
-          // Avatar upload failed, continue with signup
-        }
-      }
-
-      if (data.referralCode) {
-        // Note: Referral creation is now handled by the handle_new_user trigger
-      }
+      setCreatedUserId(userId);
 
       return { userId, phoneNumber: data.phoneNumber };
     },
     retry: false, // FIX: Prevent 429 rate limit errors on retry
-    onSuccess: ({ userId }) => {
-      setCreatedUserId(userId);
+    onSuccess: () => {
       setShowPaymentDialog(true);
     },
     onError: (error: any) => {
@@ -419,9 +465,21 @@ export function SignupPage() {
     signupMutation.mutate(data);
   };
 
-  const handlePayNow = () => {
-    if (createdUserId && phoneNumber) {
-      paymentMutation.mutate({ userId: createdUserId, phone: phoneNumber });
+  const handlePayNow = async () => {
+    if (!createdUserId || !phoneNumber || !createdUserData) return;
+
+    try {
+      const { email, password, userId } = createdUserData;
+      const { error: signInError } = await signIn(email, password);
+      if (signInError) {
+        alert('Failed to sign in before initiating payment. Please try logging in.');
+        return;
+      }
+
+      paymentMutation.mutate({ userId, phone: phoneNumber });
+    } catch (e) {
+      console.error('Error signing in before payment', e);
+      alert('Unexpected error. Please try again.');
     }
   };
 
