@@ -152,16 +152,16 @@ export function MafulluPage() {
 
           if (statusData?.payment_status === 'completed') {
             clearInterval(poll);
-            
-            // Mark content as purchased
-            await supabase
-              .from('mafullu_content')
-              .update({ 
-                is_purchased: true, 
-                purchased_by: user!.id,
-                purchased_at: new Date().toISOString(),
-              })
-              .eq('id', availableContent.id);
+
+            const { data: purchaseResult, error: purchaseError } = await supabase.rpc(
+              'mark_mafullu_purchased',
+              { p_content_id: availableContent.id }
+            );
+
+            if (purchaseError) throw purchaseError;
+            if (!purchaseResult?.success) {
+              throw new Error(purchaseResult?.error || 'Failed to mark Mafullu content as purchased');
+            }
 
             resolve();
           } else if (attempts >= maxAttempts) {

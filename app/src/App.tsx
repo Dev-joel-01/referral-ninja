@@ -61,6 +61,8 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  const enablePWA = import.meta.env.VITE_ENABLE_PWA !== 'false'
+
   return (
     <ErrorBoundary>
       <>
@@ -246,7 +248,7 @@ function App() {
             />
           </Routes>
         </Router>
-        <PWAInstallPrompt />
+        {enablePWA && <PWAInstallPrompt />}
         <Toaster 
           position="top-right"
           toastOptions={{

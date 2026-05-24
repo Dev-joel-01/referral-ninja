@@ -107,7 +107,7 @@ export default function LandingPage() {
                 Sign In
               </Button>
               <Button 
-                onClick={() => navigate('/register')}
+                onClick={() => navigate('/login')}
                 className="bg-[#39FF14] text-[#050B06] hover:bg-[#2de00f]"
               >
                 Get Started
@@ -139,7 +139,7 @@ export default function LandingPage() {
                 Sign In
               </Button>
               <Button 
-                onClick={() => navigate('/register')}
+                onClick={() => navigate('/login')}
                 className="w-full mt-2 bg-[#39FF14] text-[#050B06]"
               >
                 Get Started
@@ -169,7 +169,7 @@ export default function LandingPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-4 mb-8">
                 <Button 
-                  onClick={() => navigate('/register')}
+                  onClick={() => navigate('/login')}
                   className="bg-[#39FF14] text-[#050B06] hover:bg-[#2de00f] text-lg px-8 py-6 font-semibold"
                 >
                   Browse Tasks <ArrowRight className="ml-2" />
@@ -405,7 +405,7 @@ export default function LandingPage() {
               ))}
             </ul>
             <Button 
-              onClick={() => navigate('/register')}
+              onClick={() => navigate('/login')}
               className="w-full bg-[#39FF14] text-[#050B06] hover:bg-[#2de00f] text-lg py-6 font-semibold"
             >
               Get Started

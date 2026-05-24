@@ -10,8 +10,12 @@ export function CursorGlow() {
   useEffect(() => {
     // Check if touch device
     const checkTouch = window.matchMedia('(pointer: coarse)').matches;
-    setIsTouchDevice(checkTouch);
-    if (checkTouch) return;
+    if (checkTouch) {
+      setIsTouchDevice(true);
+      return;
+    }
+
+    setIsTouchDevice(false);
 
     const handleMouseMove = (e: MouseEvent) => {
       targetRef.current = { x: e.clientX, y: e.clientY };

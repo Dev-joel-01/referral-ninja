@@ -17,6 +17,38 @@ This guide will walk you through setting up the complete Referral Ninja applicat
 
 ## Step 2: Set Up Database Schema
 
+### Fastest local workflow (recommended)
+
+1. Verify Docker is available:
+```bash
+npm run supabase:check
+```
+
+2. Start the local Supabase stack:
+```bash
+npm run supabase:start
+```
+
+3. Open the local SQL Editor and Studio:
+```bash
+npm run supabase:studio
+```
+
+4. Reset the local database from the migration files:
+```bash
+npm run supabase:reset
+```
+
+5. Use the SQL Editor in Studio to inspect, test, and iterate on the schema.
+
+> Local Supabase requires Docker Desktop. If the check fails, install Docker Desktop and start it before running the commands above.
+
+This is the fastest path for local development and keeps the database in sync with `supabase/migrations/001_initial_schema.sql`.
+
+### Remote / hosted workflow
+
+If you are using a hosted Supabase project instead of local services:
+
 1. In your Supabase dashboard, go to the **SQL Editor**
 2. Create a **New Query**
 3. Copy and paste the entire contents of `supabase/migrations/001_initial_schema.sql`
@@ -139,6 +171,7 @@ UPDATE public.profiles
 SET is_admin = TRUE 
 WHERE email = 'admin@referralninja.co.ke';
 ```
+
 
 ## Step 8: Build and Deploy
 

@@ -7,7 +7,15 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "supabase:check": "node scripts/supabase-check.mjs",
+    "supabase:start": "npm run supabase:check && npx --yes supabase start",
+    "supabase:stop": "npx --yes supabase stop",
+    "supabase:status": "npm run supabase:check && npx --yes supabase status",
+    "supabase:studio": "npm run supabase:check && npx --yes supabase studio",
+    "supabase:reset": "npm run supabase:check && npx --yes supabase db reset",
+    "supabase:diff": "npm run supabase:check && npx --yes supabase db diff --schema public",
+    "supabase:types": "npm run supabase:check && npx --yes supabase gen types typescript --local > src/types/database.ts"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",

@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
+// Ensure the Supabase URL is clean (base domain only, no paths)
+const rawUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
+const supabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, ''); // Remove trailing /rest/v1 if present
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {

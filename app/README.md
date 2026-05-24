@@ -62,7 +62,31 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-### 3. Set Up Supabase Backend
+### 3. Local Supabase SQL Editor Workflow
+
+For faster database iteration, use the local Supabase Studio and CLI commands:
+
+```bash
+npm run supabase:start
+npm run supabase:studio
+npm run supabase:reset
+```
+
+Useful commands:
+
+```bash
+npm run supabase:check
+npm run supabase:status
+npm run supabase:stop
+npm run supabase:diff
+npm run supabase:types
+```
+
+> Local Supabase requires Docker Desktop. If Docker is not running, `npm run supabase:check` will tell you exactly what to install or start.
+
+This opens the local SQL Editor, reloads the schema from `supabase/migrations/001_initial_schema.sql`, and keeps the backend aligned with the app.
+
+### 4. Set Up Supabase Backend
 
 Follow the detailed setup guide in [SETUP.md](./SETUP.md):
 
@@ -72,13 +96,13 @@ Follow the detailed setup guide in [SETUP.md](./SETUP.md):
 4. Deploy edge functions
 5. Configure environment variables
 
-### 4. Run Development Server
+### 5. Run Development Server
 
 ```bash
 npm run dev
 ```
 
-### 5. Build for Production
+### 6. Build for Production
 
 ```bash
 npm run build

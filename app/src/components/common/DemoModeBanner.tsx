@@ -1,32 +1,19 @@
 import { AlertTriangle, ExternalLink } from 'lucide-react';
-import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+
+const placeholderSupabaseUrl = 'https://your-project.supabase.co';
+const placeholderSupabaseKey = 'your-anon-key';
 
 export function DemoModeBanner() {
-  const [isConfigured, setIsConfigured] = useState(true);
-  const [isChecking, setIsChecking] = useState(true);
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-  useEffect(() => {
-    const checkSupabase = async () => {
-      try {
-        // Check if Supabase is properly configured
-        const { error } = await supabase.from('profiles').select('count', { count: 'exact', head: true });
-        
-        // If we get a 404 or connection error, Supabase is not configured
-        if (error && (error.message.includes('connection') || error.code === '404')) {
-          setIsConfigured(false);
-        }
-      } catch {
-        setIsConfigured(false);
-      } finally {
-        setIsChecking(false);
-      }
-    };
+  const isConfigured =
+    Boolean(supabaseUrl) &&
+    supabaseUrl !== placeholderSupabaseUrl &&
+    Boolean(supabaseAnonKey) &&
+    supabaseAnonKey !== placeholderSupabaseKey;
 
-    checkSupabase();
-  }, []);
-
-  if (isChecking || isConfigured) return null;
+  if (isConfigured) return null;
 
   return (
     <div className="fixed top-0 left-0 right-0 z-50 bg-yellow-500/90 backdrop-blur-sm border-b border-yellow-400">

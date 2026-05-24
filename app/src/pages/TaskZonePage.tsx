@@ -107,12 +107,13 @@ export function TaskZonePage() {
         .insert({ task_id: task.id, user_id: user.id });
       
       if (clickError) throw clickError;
-      
-      await supabase
-        .from('tasks')
-        .update({ click_count: (task.click_count || 0) + 1 })
-        .eq('id', task.id);
-      
+
+      const { error: incrementError } = await supabase.rpc('increment_task_clicks', {
+        task_id: task.id,
+      });
+
+      if (incrementError) throw incrementError;
+
       return task.id;
     },
     onMutate: async (task) => {
