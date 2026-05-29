@@ -215,6 +215,7 @@ export function SignupPage() {
     username: string;
     phoneNumber: string;
     referralCode?: string | null;
+    usedReferralCode?: string | null;
   } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -269,7 +270,7 @@ export function SignupPage() {
           p_email: email,
           p_phone_number: phoneNumber,
           p_referral_code: referralCode || null,
-          p_referred_by: createdUserData.referralCode || null,
+          p_referred_by: createdUserData.usedReferralCode || null,
         });
 
         if (setupError) {
@@ -352,6 +353,7 @@ export function SignupPage() {
       const userId = authData.user.id;
 
       // Store created user credentials locally so we can finish setup after payment
+      const usedReferralCode = data.referralCode || null;
       setCreatedUserData({
         userId,
         email: data.email,
@@ -359,7 +361,8 @@ export function SignupPage() {
         legalName: data.legalName,
         username: data.username,
         phoneNumber: data.phoneNumber,
-        referralCode: referralCode,
+        referralCode: referralCode,          // new user code
+        usedReferralCode,                    // code entered by the user
       });
 
       setCreatedUserId(userId);
