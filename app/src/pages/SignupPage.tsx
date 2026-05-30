@@ -215,7 +215,7 @@ export function SignupPage() {
     username: string;
     phoneNumber: string;
     referralCode?: string | null;
-    usedReferralCode?: string | null;
+    referredBy?: string | null;
   } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -253,7 +253,7 @@ export function SignupPage() {
       if (!createdUserData) return;
 
       try {
-        const { email, password, userId, legalName, username, phoneNumber, referralCode } = createdUserData;
+        const { email, password, userId, legalName, username, phoneNumber, referralCode, referredBy } = createdUserData;
 
         // Sign in to create a session for RPCs that require auth
         const { error: signInError } = await signIn(email, password);
@@ -270,7 +270,7 @@ export function SignupPage() {
           p_email: email,
           p_phone_number: phoneNumber,
           p_referral_code: referralCode || null,
-          p_referred_by: createdUserData.usedReferralCode || null,
+          p_referred_by: referredBy || null,
         });
 
         if (setupError) {
@@ -353,7 +353,6 @@ export function SignupPage() {
       const userId = authData.user.id;
 
       // Store created user credentials locally so we can finish setup after payment
-      const usedReferralCode = data.referralCode || null;
       setCreatedUserData({
         userId,
         email: data.email,
@@ -361,8 +360,8 @@ export function SignupPage() {
         legalName: data.legalName,
         username: data.username,
         phoneNumber: data.phoneNumber,
-        referralCode: referralCode,          // new user code
-        usedReferralCode,                    // code entered by the user
+        referralCode: referralCode,
+        referredBy: data.referralCode || null,
       });
 
       setCreatedUserId(userId);
