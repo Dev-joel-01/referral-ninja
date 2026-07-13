@@ -5,9 +5,16 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Credentials': 'true',
 };
+
+const createCorsHeaders = (origin: string | null) => ({
+  ...corsHeaders,
+  'Access-Control-Allow-Origin': origin || '*',
+  Vary: 'Origin',
+});
 
 // Email templates
 const emailTemplates: Record<string, (data: any) => { subject: string; html: string }> = {
@@ -159,9 +166,12 @@ const emailTemplates: Record<string, (data: any) => { subject: string; html: str
 };
 
 serve(async (req) => {
+  const origin = req.headers.get('origin');
+  const responseHeaders = createCorsHeaders(origin);
+
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { headers: responseHeaders });
   }
   
   try {
@@ -171,7 +181,7 @@ serve(async (req) => {
     if (!to || !template) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields: to, template' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 400, headers: { ...responseHeaders, 'Content-Type': 'application/json' } }
       );
     }
     
@@ -181,7 +191,7 @@ serve(async (req) => {
     if (!brevoApiKey) {
       return new Response(
         JSON.stringify({ error: 'Brevo API key not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 500, headers: { ...responseHeaders, 'Content-Type': 'application/json' } }
       );
     }
     
@@ -190,7 +200,7 @@ serve(async (req) => {
     if (!templateFn) {
       return new Response(
         JSON.stringify({ error: `Unknown template: ${template}` }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 400, headers: { ...responseHeaders, 'Content-Type': 'application/json' } }
       );
     }
     
@@ -229,7 +239,7 @@ serve(async (req) => {
         message: 'Email sent successfully',
         messageId: result.messageId,
       }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { headers: { ...responseHeaders, 'Content-Type': 'application/json' } }
     );
     
   } catch (error) {
@@ -240,7 +250,7 @@ serve(async (req) => {
         success: false,
         error: error.message || 'Internal server error',
       }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 500, headers: { ...responseHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });

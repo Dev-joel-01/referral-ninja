@@ -90,7 +90,7 @@ export function ForgotPasswordPage() {
       if (resetError) throw resetError;
 
       // Send email via edge function
-      const { error: emailError } = await supabase.functions.invoke('send-email', {
+      const { error: emailError } = await supabase.functions.invoke('send-email-brevo', {
         body: {
           to: data.email,
           subject: 'Password Reset Code - Referral Ninja',

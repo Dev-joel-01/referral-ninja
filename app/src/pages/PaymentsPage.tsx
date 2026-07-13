@@ -194,7 +194,7 @@ export function PaymentsPage() {
       if (codeError) throw codeError;
 
       // Send email and fail fast if it doesn't go through
-      const { error: emailError } = await supabase.functions.invoke('send-email', {
+      const { error: emailError } = await supabase.functions.invoke('send-email-brevo', {
         body: {
           to: user!.email,
           subject: 'Withdrawal Verification Code - Referral Ninja',
