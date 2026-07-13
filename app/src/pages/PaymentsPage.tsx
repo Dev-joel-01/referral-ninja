@@ -193,17 +193,19 @@ export function PaymentsPage() {
 
       if (codeError) throw codeError;
 
-      // Send email (fire and forget)
-      supabase.functions.invoke('send-email', {
+      // Send email and fail fast if it doesn't go through
+      const { error: emailError } = await supabase.functions.invoke('send-email', {
         body: {
           to: user!.email,
           subject: 'Withdrawal Verification Code - Referral Ninja',
           template: 'withdrawal-verification',
           data: { code, amount: data.amount },
         },
-      }).catch(() => {
-        // Data URL conversion failed
       });
+
+      if (emailError) {
+        throw emailError;
+      }
 
       setPendingWithdrawal({ ...data, codeId: codeData.id });
       setShowWithdrawDialog(false);
