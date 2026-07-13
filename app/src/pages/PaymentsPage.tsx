@@ -19,6 +19,7 @@ import { GlassCard } from '@/components/layout/GlassCard';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { queryKeys } from '@/lib/queryKeys';
+import { MINIMUM_WITHDRAWAL } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,7 +29,7 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 const withdrawalSchema = z.object({
-  amount: z.number().min(500, 'Minimum withdrawal is KSh 500'),
+  amount: z.number().min(MINIMUM_WITHDRAWAL, `Minimum withdrawal is KSh ${MINIMUM_WITHDRAWAL}`),
   phoneNumber: z.string().regex(/^254[0-9]{9}$/, 'Phone number must be in format 254XXXXXXXXX'),
 });
 
@@ -340,7 +341,7 @@ export function PaymentsPage() {
             <GlassCard padding="md" className="flex items-center justify-center">
               <div className="text-center">
                 <p className="text-ninja-sage text-sm mb-2">Withdrawal Limit</p>
-                <p className="text-2xl font-heading text-ninja-mint">KSh 500</p>
+                <p className="text-2xl font-heading text-ninja-mint">KSh {MINIMUM_WITHDRAWAL}</p>
                 <p className="text-ninja-sage text-xs mt-1">Minimum per withdrawal</p>
               </div>
             </GlassCard>
@@ -359,7 +360,7 @@ export function PaymentsPage() {
           </div>
           <Button
             onClick={() => setShowWithdrawDialog(true)}
-            disabled={stats.availableBalance < 500 || isLoading}
+            disabled={stats.availableBalance < MINIMUM_WITHDRAWAL || isLoading}
             className="btn-primary"
           >
             <ArrowUpRight className="w-4 h-4 mr-2" />
@@ -367,11 +368,11 @@ export function PaymentsPage() {
           </Button>
         </div>
         
-        {stats.availableBalance < 500 && !isLoading && (
+        {stats.availableBalance < MINIMUM_WITHDRAWAL && !isLoading && (
           <div className="mt-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-yellow-400" />
             <p className="text-yellow-400 text-sm">
-              You need at least KSh 500 to withdraw. Keep referring!
+              You need at least KSh {MINIMUM_WITHDRAWAL} to withdraw. Keep referring!
             </p>
           </div>
         )}
@@ -472,8 +473,8 @@ export function PaymentsPage() {
                 id="amount"
                 type="number"
                 {...register('amount', { valueAsNumber: true })}
-                placeholder="500"
-                min={500}
+                placeholder={String(MINIMUM_WITHDRAWAL)}
+                min={MINIMUM_WITHDRAWAL}
                 max={stats.availableBalance}
                 className={cn(
                   'input-field',

@@ -430,7 +430,7 @@ export function DashboardPage() {
           </div>
           <div>
             <p className="text-ninja-mint font-medium">Withdraw</p>
-            <p className="text-ninja-sage text-sm">Min: KSh 500</p>
+            <p className="text-ninja-sage text-sm">Min: KSh 100</p>
           </div>
           <ExternalLink className="w-4 h-4 text-ninja-sage ml-auto" />
         </a>

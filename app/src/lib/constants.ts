@@ -7,7 +7,7 @@ export const APP_TAGLINE = 'Turn referrals into income';
 export const REGISTRATION_FEE = 200; // KSh
 export const REFERRAL_COMMISSION = 100; // KSh (50% of registration fee)
 export const MAFULLU_PRICE = 300; // KSh
-export const MINIMUM_WITHDRAWAL = 500; // KSh
+export const MINIMUM_WITHDRAWAL = 100; // KSh
 
 // Password Reset
 export const MAX_PASSWORD_RESETS = 3;

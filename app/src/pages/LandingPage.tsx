@@ -73,7 +73,7 @@ export default function LandingPage() {
 
   const referralInfo = {
     amount: "KSh 100",
-    minWithdrawal: "KSh 500",
+    minWithdrawal: "KSh 100",
     note: "Referral earnings are separate from task income. Withdraw when you hit the minimum."
   };
 
@@ -315,7 +315,7 @@ export default function LandingPage() {
                 </div>
                 <div className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-[#39FF14] mt-0.5 flex-shrink-0" />
-                  <span>Withdraw referral earnings separately when you reach KSh 500</span>
+                  <span>Withdraw referral earnings separately when you reach KSh 100</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <Shield className="w-4 h-4 text-[#39FF14] mt-0.5 flex-shrink-0" />
@@ -329,23 +329,23 @@ export default function LandingPage() {
               <div className="space-y-4">
                 <div className="p-4 bg-[#050B06] rounded-lg">
                   <div className="flex justify-between mb-2">
-                    <span className="text-[#9AB89A]">You refer 5 friends</span>
-                    <span className="text-[#39FF14] font-semibold">KSh 500</span>
+                    <span className="text-[#9AB89A]">You refer 1 friend</span>
+                    <span className="text-[#39FF14] font-semibold">KSh 100</span>
                   </div>
                   <div className="text-xs text-[#9AB89A]">Ready to withdraw</div>
                 </div>
                 <div className="p-4 bg-[#050B06] rounded-lg opacity-50">
                   <div className="flex justify-between mb-2">
-                    <span className="text-[#9AB89A]">You refer 3 friends</span>
-                    <span className="text-[#E8FFE8] font-semibold">KSh 300</span>
+                    <span className="text-[#9AB89A]">You refer 0 friends</span>
+                    <span className="text-[#E8FFE8] font-semibold">KSh 0</span>
                   </div>
-                  <div className="text-xs text-[#9AB89A]">Need KSh 200 more to withdraw</div>
+                  <div className="text-xs text-[#9AB89A]">Need KSh 100 more to withdraw</div>
                 </div>
               </div>
               <div className="mt-6 p-4 bg-[#39FF14]/5 rounded-lg border border-[#39FF14]/20">
                 <p className="text-sm text-[#9AB89A]">
                   <strong className="text-[#E8FFE8]">Note:</strong> Referral earnings are kept separate 
-                  from any task-related income. You can only withdraw referral money when you hit the KSh 500 minimum.
+                  from any task-related income. You can only withdraw referral money when you hit the KSh 100 minimum.
                 </p>
               </div>
             </GlassCard>
@@ -396,7 +396,7 @@ export default function LandingPage() {
                 "Detailed application guidelines",
                 "New listings added regularly",
                 "Optional: KSh 100 per referral",
-                "Withdraw referrals at KSh 500 min"
+                "Withdraw referrals at KSh 100 min"
               ].map((item, idx) => (
                 <li key={idx} className="flex items-center gap-3 text-[#E8FFE8]">
                   <CheckCircle className="w-4 h-4 text-[#39FF14] flex-shrink-0" />
