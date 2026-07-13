@@ -150,16 +150,36 @@ export function PaymentsPage() {
   const stats = paymentData?.stats || { availableBalance: 0, totalWithdrawn: 0, totalEarned: 0 };
   const withdrawals = paymentData?.withdrawals || [];
 
+  const withdrawalCooldownMs = 6 * 60 * 60 * 1000;
+  const latestWithdrawal = withdrawals[0];
+  const nextWithdrawalAllowedAt = latestWithdrawal
+    ? new Date(new Date(latestWithdrawal.requested_at).getTime() + withdrawalCooldownMs)
+    : null;
+  const cooldownActive = nextWithdrawalAllowedAt ? nextWithdrawalAllowedAt > new Date() : false;
+
+  const formatTimeRemaining = (target: Date) => {
+    const diff = target.getTime() - Date.now();
+    if (diff <= 0) return 'now';
+    const hours = Math.floor(diff / (60 * 60 * 1000));
+    const minutes = Math.floor((diff % (60 * 60 * 1000)) / (60 * 1000));
+    return `${hours > 0 ? `${hours}h ` : ''}${minutes}m`;
+  };
+
   const initiateWithdrawal = useCallback(async (data: WithdrawalFormData) => {
     if (data.amount > stats.availableBalance) {
       setMessage('Insufficient balance');
       return;
     }
 
+    if (cooldownActive && nextWithdrawalAllowedAt) {
+      setMessage(`You can request another withdrawal in ${formatTimeRemaining(nextWithdrawalAllowedAt)}.`);
+      return;
+    }
+
     setMessage('');
 
     withdrawalMutation.mutate(data);
-  }, [stats.availableBalance, withdrawalMutation]);
+  }, [stats.availableBalance, cooldownActive, nextWithdrawalAllowedAt, withdrawalMutation]);
 
   const refreshData = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: paymentKeys.all });
@@ -279,7 +299,7 @@ export function PaymentsPage() {
           </div>
           <Button
             onClick={() => setShowWithdrawDialog(true)}
-            disabled={stats.availableBalance < MINIMUM_WITHDRAWAL || isLoading}
+            disabled={stats.availableBalance < MINIMUM_WITHDRAWAL || isLoading || cooldownActive}
             className="btn-primary"
           >
             <ArrowUpRight className="w-4 h-4 mr-2" />
@@ -292,6 +312,14 @@ export function PaymentsPage() {
             <AlertCircle className="w-4 h-4 text-yellow-400" />
             <p className="text-yellow-400 text-sm">
               You need at least KSh {MINIMUM_WITHDRAWAL} to withdraw. Keep referring!
+            </p>
+          </div>
+        )}
+        {cooldownActive && !isLoading && (
+          <div className="mt-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-yellow-400" />
+            <p className="text-yellow-400 text-sm">
+              Withdrawal requests are limited to once every 6 hours. Please try again in {formatTimeRemaining(nextWithdrawalAllowedAt!)}.
             </p>
           </div>
         )}

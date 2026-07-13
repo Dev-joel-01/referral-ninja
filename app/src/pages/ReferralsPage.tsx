@@ -389,25 +389,25 @@ export function ReferralsPage() {
                     className="flex items-center gap-4 p-4 rounded-xl bg-ninja-black/50 border border-ninja-green/10 hover:bg-ninja-green/5 transition-colors"
                   >
                     <div className="w-12 h-12 rounded-full bg-ninja-green/20 flex items-center justify-center overflow-hidden">
-                      {referral.referred.avatar_url ? (
+                      {referral.referred?.avatar_url ? (
                         <img 
                           src={referral.referred.avatar_url} 
-                          alt={referral.referred.username}
+                          alt={referral.referred?.username || 'Referral'}
                           className="w-full h-full object-cover"
                           loading="lazy"
                         />
                       ) : (
                         <span className="text-ninja-green font-medium">
-                          {referral.referred.username.charAt(0).toUpperCase()}
+                          {(referral.referred?.username || 'U').charAt(0).toUpperCase()}
                         </span>
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-ninja-mint font-medium truncate">
-                        {referral.referred.legal_name}
+                        {referral.referred?.legal_name || 'Unknown User'}
                       </p>
                       <p className="text-ninja-sage text-sm">
-                        @{referral.referred.username}
+                        @{referral.referred?.username || 'unknown'}
                       </p>
                     </div>
                     <div className="text-right">
