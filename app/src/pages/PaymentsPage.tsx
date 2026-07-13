@@ -142,7 +142,8 @@ export function PaymentsPage() {
       setTimeout(() => setMessage(''), 3000);
     },
     onError: (error: any) => {
-      setMessage(error.message || 'Failed to submit withdrawal');
+      const message = error?.message || error?.details || 'Failed to submit withdrawal';
+      setMessage(message);
     },
   });
 
