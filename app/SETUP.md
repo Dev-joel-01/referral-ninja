@@ -93,7 +93,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 ```bash
 supabase functions deploy mpesa-stk-push
 supabase functions deploy mpesa-callback
-supabase functions deploy send-email
+supabase functions deploy send-email-brevo
 ```
 
 ### Option B: Using Supabase Dashboard
@@ -102,7 +102,7 @@ supabase functions deploy send-email
 2. Click **New Function** for each function:
    - `mpesa-stk-push`
    - `mpesa-callback`
-   - `send-email`
+   - `send-email-brevo`
 3. Copy and paste the code from the respective files in `supabase/functions/`
 
 ## Step 5: Configure Environment Variables

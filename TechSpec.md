@@ -426,7 +426,7 @@ interface EmailConfig {
 ```typescript
 // verify-payment: Checks M-Pesa payment status
 // process-withdrawal: Handles withdrawal requests
-// send-email: Sends emails via Brevo
+// send-email-brevo: Sends emails via Brevo
 ```
 
 ## 7. Authentication Flow

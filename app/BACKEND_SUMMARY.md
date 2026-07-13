@@ -351,7 +351,7 @@ Fires when a payment is updated.
 - [ ] Create Supabase project
 - [ ] Run database migration (`001_initial_schema.sql`)
 - [ ] Create storage buckets (avatars, task-images, mafullu-images)
-- [ ] Deploy edge functions (mpesa-stk-push, mpesa-callback, send-email)
+- [ ] Deploy edge functions (mpesa-stk-push, mpesa-callback, send-email-brevo)
 - [ ] Configure environment variables
 - [ ] Create admin user
 - [ ] Test payment flow
@@ -369,7 +369,7 @@ https://your-project.supabase.co/rest/v1/{table}
 ```
 POST https://your-project.supabase.co/functions/v1/mpesa-stk-push
 POST https://your-project.supabase.co/functions/v1/mpesa-callback
-POST https://your-project.supabase.co/functions/v1/send-email
+POST https://your-project.supabase.co/functions/v1/send-email-brevo
 ```
 
 ## Monitoring

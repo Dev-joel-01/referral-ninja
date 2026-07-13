@@ -46,7 +46,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 # Deploy functions
 supabase functions deploy mpesa-stk-push
 supabase functions deploy mpesa-callback
-supabase functions deploy send-email
+supabase functions deploy send-email-brevo
 ```
 
 ### Step 5: Set Environment Variables

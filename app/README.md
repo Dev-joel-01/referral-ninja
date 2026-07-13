@@ -151,7 +151,7 @@ referral-ninja/
 - `mpesa-callback` - Handles M-Pesa payment callbacks
 
 ### Email Service
-- `send-email` - Sends emails via Brevo API
+- `send-email-brevo` - Sends emails via Brevo API
 
 ## Database Schema
 
@@ -174,7 +174,7 @@ All API calls use Supabase client. See `src/lib/supabase.ts` for helper function
 ### Edge Functions
 - `POST /functions/v1/mpesa-stk-push` - Initiate payment
 - `POST /functions/v1/mpesa-callback` - Payment callback
-- `POST /functions/v1/send-email` - Send email
+- `POST /functions/v1/send-email-brevo` - Send email
 
 ## Customization
 

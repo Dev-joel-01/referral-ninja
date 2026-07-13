@@ -8,10 +8,8 @@ import {
   ArrowDownLeft, 
   ArrowUpRight,
   Loader2,
-  Check,
   AlertCircle,
   Smartphone,
-  Mail,
   RefreshCw
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -92,9 +90,6 @@ export function PaymentsPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [showWithdrawDialog, setShowWithdrawDialog] = useState(false);
-  const [showVerificationDialog, setShowVerificationDialog] = useState(false);
-  const [verificationCode, setVerificationCode] = useState('');
-  const [pendingWithdrawal, setPendingWithdrawal] = useState<WithdrawalFormData & { codeId?: string } | null>(null);
   const [message, setMessage] = useState('');
 
   const {
@@ -126,8 +121,7 @@ export function PaymentsPage() {
 
   // Withdrawal mutation
   const withdrawalMutation = useMutation({
-    mutationFn: async (data: WithdrawalFormData & { code: string; codeId: string }) => {
-      // Create withdrawal
+    mutationFn: async (data: WithdrawalFormData) => {
       const { error: withdrawalError } = await supabase
         .from('withdrawals')
         .insert({
@@ -138,25 +132,13 @@ export function PaymentsPage() {
         });
 
       if (withdrawalError) throw withdrawalError;
-      
-      // Mark code as used
-      await supabase
-        .from('password_resets')
-        .update({ used_at: new Date().toISOString() })
-        .eq('id', data.codeId);
-
       return data;
     },
     onSuccess: () => {
-      // Invalidate and refetch
       queryClient.invalidateQueries({ queryKey: paymentKeys.all });
-      setMessage('Withdrawal request submitted successfully!');
-      setShowVerificationDialog(false);
-      setPendingWithdrawal(null);
-      setVerificationCode('');
+      setMessage('Withdrawal request submitted for admin approval.');
+      setShowWithdrawDialog(false);
       reset();
-      
-      // Clear success message after 3 seconds
       setTimeout(() => setMessage(''), 3000);
     },
     onError: (error: any) => {
@@ -176,73 +158,8 @@ export function PaymentsPage() {
 
     setMessage('');
 
-    try {
-      // Generate 6-digit verification code
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-      // Store code
-      const { data: codeData, error: codeError } = await supabase
-        .from('password_resets')
-        .insert({
-          user_id: user!.id,
-          reset_code: code,
-          expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-        })
-        .select()
-        .single();
-
-      if (codeError) throw codeError;
-
-      // Send email and fail fast if it doesn't go through
-      const { error: emailError } = await supabase.functions.invoke('send-email-brevo', {
-        body: {
-          to: user!.email,
-          subject: 'Withdrawal Verification Code - Referral Ninja',
-          template: 'withdrawal-verification',
-          data: { code, amount: data.amount },
-        },
-      });
-
-      if (emailError) {
-        throw emailError;
-      }
-
-      setPendingWithdrawal({ ...data, codeId: codeData.id });
-      setShowWithdrawDialog(false);
-      setShowVerificationDialog(true);
-      setMessage('Verification code sent to your email');
-    } catch (error: any) {
-      setMessage(error.message || 'Failed to initiate withdrawal');
-    }
-  }, [user, stats.availableBalance]);
-
-  const verifyAndWithdraw = useCallback(async () => {
-    if (!pendingWithdrawal || !verificationCode) return;
-
-    // Verify code
-    const { data: codeData, error: codeError } = await supabase
-      .from('password_resets')
-      .select('*')
-      .eq('user_id', user!.id)
-      .eq('reset_code', verificationCode)
-      .is('used_at', null)
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (codeError || !codeData) {
-      setMessage('Invalid or expired verification code');
-      return;
-    }
-
-    // Execute withdrawal
-    withdrawalMutation.mutate({
-      ...pendingWithdrawal,
-      code: verificationCode,
-      codeId: codeData.id,
-    });
-  }, [pendingWithdrawal, verificationCode, user, withdrawalMutation]);
+    withdrawalMutation.mutate(data);
+  }, [stats.availableBalance, withdrawalMutation]);
 
   const refreshData = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: paymentKeys.all });
@@ -530,71 +447,6 @@ export function PaymentsPage() {
               )}
             </Button>
           </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Verification Dialog */}
-      <Dialog open={showVerificationDialog} onOpenChange={setShowVerificationDialog}>
-        <DialogContent className="bg-ninja-dark/95 backdrop-blur-xl border-ninja-green/20 max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-heading text-ninja-mint">
-              Verify Withdrawal
-            </DialogTitle>
-            <DialogDescription className="text-ninja-sage">
-              Enter the 6-digit code sent to your email
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {message && (
-              <div className={cn(
-                'p-3 rounded-xl text-sm',
-                message.includes('success') 
-                  ? 'bg-ninja-green/10 border border-ninja-green/30 text-ninja-green'
-                  : 'bg-red-500/10 border border-red-500/30 text-red-400'
-              )}>
-                {message}
-              </div>
-            )}
-
-            <div className="flex justify-center">
-              <div className="w-16 h-16 rounded-full bg-ninja-green/20 flex items-center justify-center">
-                <Mail className="w-8 h-8 text-ninja-green" />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="code" className="text-ninja-mint text-center block">
-                Verification Code
-              </Label>
-              <Input
-                id="code"
-                value={verificationCode}
-                onChange={(e) => setVerificationCode(e.target.value)}
-                placeholder="000000"
-                maxLength={6}
-                className="input-field text-center text-2xl tracking-widest"
-              />
-            </div>
-
-            <Button
-              onClick={verifyAndWithdraw}
-              disabled={withdrawalMutation.isPending || verificationCode.length !== 6}
-              className="w-full btn-primary h-12"
-            >
-              {withdrawalMutation.isPending ? (
-                <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Verifying...
-                </>
-              ) : (
-                <>
-                  <Check className="w-5 h-5 mr-2" />
-                  Confirm Withdrawal
-                </>
-              )}
-            </Button>
-          </div>
         </DialogContent>
       </Dialog>
     </div>

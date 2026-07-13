@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface WithdrawalWithUser {
   id: string;
@@ -141,8 +142,10 @@ export function PaymentManager() {
     onError: (_err, _withdrawalId, context) => {
       queryClient.setQueryData(paymentKeys.withdrawals(), context?.previousData);
     },
-    onSettled: () => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: paymentKeys.withdrawals() });
+      queryClient.invalidateQueries({ queryKey: paymentKeys.all });
+      toast.success('Withdrawal approved and user balance will update shortly.');
     },
   });
 
@@ -191,6 +194,10 @@ export function PaymentManager() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: paymentKeys.withdrawals() });
+      queryClient.invalidateQueries({ queryKey: paymentKeys.all });
+    },
+    onSuccess: () => {
+      toast.success('Withdrawal rejected and the user has been notified.');
     },
   });
 
